@@ -50,4 +50,20 @@ router.post('/user/login', async (req, res) => {
     }
 });
 
+// ====================================================
+// ★ 新規追加：利用者の一覧を取得するAPI（名前ボタン用）
+// ====================================================
+router.get('/users', async (req, res) => {
+    try {
+        // PINコードは除外し、IDと名前だけを安全に取得（GASのスプレッドシート読み込みに相当）
+        const result = await pool.query(
+            'SELECT user_id, last_name, first_name FROM fukushi_users ORDER BY user_id ASC'
+        );
+        res.json({ success: true, users: result.rows });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ success: false, message: 'サーバーエラーが発生しました' });
+    }
+});
+
 module.exports = router;
