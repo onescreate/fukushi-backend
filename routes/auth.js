@@ -114,8 +114,13 @@ router.get('/admin/attendance', async (req, res) => {
 // ====================================================
 
 const createAdvancedTables = `
+    -- ★ 追加：古い構造のテーブルが残っていたら一度削除（リセット）する
+    DROP TABLE IF EXISTS fukushi_schedule_details CASCADE;
+    DROP TABLE IF EXISTS fukushi_schedules CASCADE;
+    DROP TABLE IF EXISTS fukushi_meals CASCADE;
+
     -- 1. 予定管理テーブル（タイムカード・予定）
-    CREATE TABLE IF NOT EXISTS fukushi_schedules (
+    CREATE TABLE fukushi_schedules (
         plan_id VARCHAR(50) PRIMARY KEY,
         user_id VARCHAR(50) NOT NULL,
         plan_date DATE NOT NULL,
@@ -130,7 +135,7 @@ const createAdvancedTables = `
     );
 
     -- 2. 予定詳細テーブル（中抜け管理）
-    CREATE TABLE IF NOT EXISTS fukushi_schedule_details (
+    CREATE TABLE fukushi_schedule_details (
         detail_id VARCHAR(50) PRIMARY KEY,
         plan_id VARCHAR(50) REFERENCES fukushi_schedules(plan_id) ON DELETE CASCADE,
         event_type VARCHAR(50),
@@ -142,11 +147,11 @@ const createAdvancedTables = `
     );
 
     -- 3. 食事予約・実績テーブル
-    CREATE TABLE IF NOT EXISTS fukushi_meals (
+    CREATE TABLE fukushi_meals (
         meal_id VARCHAR(50) PRIMARY KEY,
         user_id VARCHAR(50) NOT NULL,
         meal_date DATE NOT NULL,
-        status VARCHAR(20) DEFAULT '予約', -- '予約', '取消', 'キャンセル'
+        status VARCHAR(20) DEFAULT '予約',
         amount INTEGER DEFAULT 300,
         situation VARCHAR(50),
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -159,14 +164,14 @@ const createAdvancedTables = `
         setting_value INTEGER NOT NULL
     );
 
-    -- 初期設定値の挿入（存在しない場合のみ）
+    -- 初期設定値の挿入
     INSERT INTO fukushi_system_settings (setting_key, setting_value) 
     VALUES ('cancel_fee', 500), ('revoke_fee', 0), ('meal_fee', 300)
     ON CONFLICT (setting_key) DO NOTHING;
 `;
 
 pool.query(createAdvancedTables)
-    .then(() => console.log("高度なスケジュール管理テーブルの作成完了"))
+    .then(() => console.log("高度なスケジュール管理テーブルの再構築完了"))
     .catch(err => console.error("テーブル作成エラー:", err));
 
 
