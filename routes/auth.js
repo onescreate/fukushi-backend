@@ -271,7 +271,7 @@ router.post('/user/schedule/submit', async (req, res) => {
     } catch (err) {
         await pool.query('ROLLBACK');
         console.error("予定申請エラー:", err);
-        res.status(500).json({ success: false, error: 'サーバーエラーが発生しました' });
+        res.status(500).json({ success: false, error: err.message });
     }
 });
 
@@ -338,7 +338,7 @@ router.post('/user/meal/submit', async (req, res) => {
     } catch (err) {
         await pool.query('ROLLBACK');
         console.error("食事予約エラー:", err);
-        res.status(500).json({ success: false, error: 'サーバーエラーが発生しました' });
+        res.status(500).json({ success: false, error: err.message });
     }
 });
 
