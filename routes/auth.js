@@ -239,25 +239,31 @@ router.post('/user/schedule/submit', async (req, res) => {
     const currentYear = now.getFullYear();
     const currentMonth = now.getMonth();
     const currentDate = now.getDate();
-    let nextMonthYear = currentYear;
-    let nextMonth = currentMonth + 1;
-    if (nextMonth > 11) { nextMonth = 0; nextMonthYear++; }
-    
-    const isBefore15th = (currentDate <= 15);
 
     try {
         await pool.query('BEGIN');
         for (let d of dates) {
-            // d は "2026-04-15" の形式
+            // d は "2026-06-03" の形式
             const [yStr, mStr, dStr] = d.split('-');
             const targetYear = parseInt(yStr, 10);
             const targetMonth = parseInt(mStr, 10) - 1; // JSの月は0始まり
-            const isNextMonth = (targetYear === nextMonthYear && targetMonth === nextMonth);
+            
+            // ★修正：現在月との「月の差（何ヶ月先か）」を計算する
+            const monthsDiff = (targetYear - currentYear) * 12 + (targetMonth - currentMonth);
             
             const existCheck = await pool.query('SELECT plan_id FROM fukushi_schedules WHERE user_id = $1 AND plan_date = $2', [user_id, d]);
             const isUpdate = existCheck.rows.length > 0;
 
-            let status = (isNextMonth && isBefore15th && !isUpdate) ? "承認済" : "承認待ち";
+            // ★修正：翌々月以降（monthsDiff >= 2）は常に承認済。翌月は15日まで承認済。それ以外は承認待ち。
+            let status = "承認待ち";
+            if (!isUpdate) {
+                if (monthsDiff >= 2) {
+                    status = "承認済"; // 翌々月以降は常に承認済
+                } else if (monthsDiff === 1 && currentDate <= 15) {
+                    status = "承認済"; // 翌月分は15日まで承認済
+                }
+            }
+
             let reasonMsg = note || "";
             
             if (isUpdate) {
