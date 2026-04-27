@@ -109,4 +109,64 @@ router.get('/admin/attendance', async (req, res) => {
     }
 });
 
+// ====================================================
+// ★ 新機能：予定・中抜け・食事管理システムのテーブル自動構築
+// ====================================================
+
+const createAdvancedTables = `
+    -- 1. 予定管理テーブル（タイムカード・予定）
+    CREATE TABLE IF NOT EXISTS fukushi_schedules (
+        plan_id VARCHAR(50) PRIMARY KEY,
+        user_id VARCHAR(50) NOT NULL,
+        plan_date DATE NOT NULL,
+        plan_in TIME,
+        plan_out TIME,
+        act_in TIME,
+        act_out TIME,
+        status VARCHAR(20) DEFAULT '承認待ち',
+        note TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- 2. 予定詳細テーブル（中抜け管理）
+    CREATE TABLE IF NOT EXISTS fukushi_schedule_details (
+        detail_id VARCHAR(50) PRIMARY KEY,
+        plan_id VARCHAR(50) REFERENCES fukushi_schedules(plan_id) ON DELETE CASCADE,
+        event_type VARCHAR(50),
+        event_detail VARCHAR(100),
+        time_out TIME,
+        time_in TIME,
+        status VARCHAR(20) DEFAULT '承認待ち',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- 3. 食事予約・実績テーブル
+    CREATE TABLE IF NOT EXISTS fukushi_meals (
+        meal_id VARCHAR(50) PRIMARY KEY,
+        user_id VARCHAR(50) NOT NULL,
+        meal_date DATE NOT NULL,
+        status VARCHAR(20) DEFAULT '予約', -- '予約', '取消', 'キャンセル'
+        amount INTEGER DEFAULT 300,
+        situation VARCHAR(50),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- 4. システム設定テーブル
+    CREATE TABLE IF NOT EXISTS fukushi_system_settings (
+        setting_key VARCHAR(50) PRIMARY KEY,
+        setting_value INTEGER NOT NULL
+    );
+
+    -- 初期設定値の挿入（存在しない場合のみ）
+    INSERT INTO fukushi_system_settings (setting_key, setting_value) 
+    VALUES ('cancel_fee', 500), ('revoke_fee', 0), ('meal_fee', 300)
+    ON CONFLICT (setting_key) DO NOTHING;
+`;
+
+pool.query(createAdvancedTables)
+    .then(() => console.log("高度なスケジュール管理テーブルの作成完了"))
+    .catch(err => console.error("テーブル作成エラー:", err));
+
 module.exports = router;
