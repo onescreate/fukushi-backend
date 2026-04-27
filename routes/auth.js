@@ -347,4 +347,67 @@ router.post('/user/meal/submit', async (req, res) => {
     }
 });
 
+// ====================================================
+// ★ 確実なDB再構築のための専用API（ブラウザから直接叩く用）
+// ====================================================
+router.get('/setup-db', async (req, res) => {
+    const forceSetupSql = `
+        DROP TABLE IF EXISTS fukushi_schedule_details CASCADE;
+        DROP TABLE IF EXISTS fukushi_schedules CASCADE;
+        DROP TABLE IF EXISTS fukushi_meals CASCADE;
+
+        CREATE TABLE fukushi_schedules (
+            plan_id VARCHAR(50) PRIMARY KEY,
+            user_id VARCHAR(50) NOT NULL,
+            plan_date DATE NOT NULL,
+            plan_in TIME,
+            plan_out TIME,
+            act_in TIME,
+            act_out TIME,
+            status VARCHAR(20) DEFAULT '承認待ち',
+            note TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE fukushi_schedule_details (
+            detail_id VARCHAR(50) PRIMARY KEY,
+            plan_id VARCHAR(50) REFERENCES fukushi_schedules(plan_id) ON DELETE CASCADE,
+            event_type VARCHAR(50),
+            event_detail VARCHAR(100),
+            time_out TIME,
+            time_in TIME,
+            status VARCHAR(20) DEFAULT '承認待ち',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE fukushi_meals (
+            meal_id VARCHAR(50) PRIMARY KEY,
+            user_id VARCHAR(50) NOT NULL,
+            meal_date DATE NOT NULL,
+            status VARCHAR(20) DEFAULT '予約',
+            amount INTEGER DEFAULT 300,
+            situation VARCHAR(50),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS fukushi_system_settings (
+            setting_key VARCHAR(50) PRIMARY KEY,
+            setting_value INTEGER NOT NULL
+        );
+
+        INSERT INTO fukushi_system_settings (setting_key, setting_value) 
+        VALUES ('cancel_fee', 500), ('revoke_fee', 0), ('meal_fee', 300)
+        ON CONFLICT (setting_key) DO NOTHING;
+    `;
+
+    try {
+        await pool.query(forceSetupSql);
+        res.json({ success: true, message: "データベースの再構築が完璧に完了しました！これでエラーは出ません。" });
+    } catch (err) {
+        res.json({ success: false, error: "テーブル作成失敗: " + err.message });
+    }
+});
+
 module.exports = router;
