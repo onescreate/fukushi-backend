@@ -176,32 +176,36 @@ pool.query(createAdvancedTables)
 
 
 // ====================================================
-// ★ 新機能：予定・食事の高度なロジックAPI（GAS完全移植）
+// ★ 新機能：予定・食事の高度なロジックAPI（GAS完全移植・バグ修正版）
 // ====================================================
 
 // 1. 月間カレンダーデータ取得API
 router.get('/user/schedule/monthly', async (req, res) => {
     const { user_id, year, month } = req.query;
     try {
-        const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
-        const endDate = `${year}-${String(month).padStart(2, '0')}-31`;
+        const y = parseInt(year, 10);
+        const m = parseInt(month, 10);
+        
+        const startDate = `${y}-${String(m).padStart(2, '0')}-01`;
+        // ★ 修正：「4月31日」のような存在しない日付によるSQLエラーを防ぐため、月の最終日を正確に計算
+        const lastDay = new Date(y, m, 0).getDate();
+        const endDate = `${y}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
 
+        // ★ 修正：TO_CHARを使ってDB側でYYYY/MM/DDにして返す（タイムゾーンのズレによる1日ズレを完全防止）
         const scheduleResult = await pool.query(
-            `SELECT * FROM fukushi_schedules WHERE user_id = $1 AND plan_date >= $2 AND plan_date <= $3`,
+            `SELECT *, TO_CHAR(plan_date, 'YYYY/MM/DD') as f_date FROM fukushi_schedules WHERE user_id = $1 AND plan_date >= $2 AND plan_date <= $3`,
             [user_id, startDate, endDate]
         );
 
         const mealResult = await pool.query(
-            `SELECT * FROM fukushi_meals WHERE user_id = $1 AND meal_date >= $2 AND meal_date <= $3 AND status = '予約'`,
+            `SELECT *, TO_CHAR(meal_date, 'YYYY/MM/DD') as f_date FROM fukushi_meals WHERE user_id = $1 AND meal_date >= $2 AND meal_date <= $3 AND status = '予約'`,
             [user_id, startDate, endDate]
         );
 
         let currentMonthSchedule = {};
         
         scheduleResult.rows.forEach(row => {
-            const dDate = new Date(row.plan_date);
-            const dStr = `${dDate.getFullYear()}/${String(dDate.getMonth() + 1).padStart(2, '0')}/${String(dDate.getDate()).padStart(2, '0')}`;
-            
+            const dStr = row.f_date; // "2026/04/15"
             currentMonthSchedule[dStr] = {
                 planIn: row.plan_in ? row.plan_in.substring(0, 5) : '',
                 planOut: row.plan_out ? row.plan_out.substring(0, 5) : '',
@@ -213,8 +217,7 @@ router.get('/user/schedule/monthly', async (req, res) => {
         });
 
         mealResult.rows.forEach(row => {
-            const dDate = new Date(row.meal_date);
-            const dStr = `${dDate.getFullYear()}/${String(dDate.getMonth() + 1).padStart(2, '0')}/${String(dDate.getDate()).padStart(2, '0')}`;
+            const dStr = row.f_date;
             if (!currentMonthSchedule[dStr]) {
                 currentMonthSchedule[dStr] = { meal: true };
             } else {
@@ -225,7 +228,7 @@ router.get('/user/schedule/monthly', async (req, res) => {
         res.json({ success: true, schedule: currentMonthSchedule });
     } catch (err) {
         console.error(err);
-        res.status(500).json({ success: false, error: 'サーバーエラー' });
+        res.status(500).json({ success: false, error: err.message });
     }
 });
 
@@ -240,34 +243,33 @@ router.post('/user/schedule/submit', async (req, res) => {
     let nextMonth = currentMonth + 1;
     if (nextMonth > 11) { nextMonth = 0; nextMonthYear++; }
     
-    // GASのロジックを継承
     const isBefore15th = (currentDate <= 15);
 
     try {
-        await pool.query('BEGIN'); // トランザクション開始
+        await pool.query('BEGIN');
         for (let d of dates) {
-            const dObj = new Date(d.replace(/-/g, '/'));
-            const targetYear = dObj.getFullYear();
-            const targetMonth = dObj.getMonth();
+            // d は "2026-04-15" の形式
+            const [yStr, mStr, dStr] = d.split('-');
+            const targetYear = parseInt(yStr, 10);
+            const targetMonth = parseInt(mStr, 10) - 1; // JSの月は0始まり
             const isNextMonth = (targetYear === nextMonthYear && targetMonth === nextMonth);
             
-            const existCheck = await pool.query('SELECT plan_id FROM fukushi_schedules WHERE user_id = $1 AND plan_date = $2', [user_id, dObj]);
+            const existCheck = await pool.query('SELECT plan_id FROM fukushi_schedules WHERE user_id = $1 AND plan_date = $2', [user_id, d]);
             const isUpdate = existCheck.rows.length > 0;
 
-            // 15日ルールと再申請のステータス判定
             let status = (isNextMonth && isBefore15th && !isUpdate) ? "承認済" : "承認待ち";
             let reasonMsg = note || "";
             
             if (isUpdate) {
                 await pool.query(
                     `UPDATE fukushi_schedules SET plan_in = $1, plan_out = $2, note = $3, status = $4, updated_at = NOW() WHERE user_id = $5 AND plan_date = $6`,
-                    [plan_in, plan_out, reasonMsg, status, user_id, dObj]
+                    [plan_in, plan_out, reasonMsg, status, user_id, d]
                 );
             } else {
                 const planId = 'A' + Date.now() + Math.floor(Math.random() * 1000);
                 await pool.query(
                     `INSERT INTO fukushi_schedules (plan_id, user_id, plan_date, plan_in, plan_out, status, note) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-                    [planId, user_id, dObj, plan_in, plan_out, status, reasonMsg]
+                    [planId, user_id, d, plan_in, plan_out, status, reasonMsg]
                 );
             }
         }
@@ -289,7 +291,6 @@ router.post('/user/meal/submit', async (req, res) => {
     try {
         await pool.query('BEGIN');
         
-        // システム設定の取得
         const conf = await pool.query('SELECT * FROM fukushi_system_settings');
         let cancelFee = 500, revokeFee = 0, mealFee = 300;
         conf.rows.forEach(r => {
@@ -298,27 +299,25 @@ router.post('/user/meal/submit', async (req, res) => {
             if(r.setting_key === 'meal_fee') mealFee = r.setting_value;
         });
 
-        // 登録処理
         if (registers && registers.length > 0) {
             for (let d of registers) {
                 const targetDate = new Date(d.replace(/-/g, '/'));
                 const mealId = 'M' + Date.now() + Math.floor(Math.random() * 1000);
-                const existCheck = await pool.query('SELECT meal_id FROM fukushi_meals WHERE user_id = $1 AND meal_date = $2', [user_id, targetDate]);
+                const existCheck = await pool.query('SELECT meal_id FROM fukushi_meals WHERE user_id = $1 AND meal_date = $2', [user_id, d]);
                 if (existCheck.rows.length > 0) {
                     await pool.query(
                         `UPDATE fukushi_meals SET status = '予約', amount = $1, updated_at = NOW() WHERE user_id = $2 AND meal_date = $3`,
-                        [mealFee, user_id, targetDate]
+                        [mealFee, user_id, d]
                     );
                 } else {
                     await pool.query(
                         `INSERT INTO fukushi_meals (meal_id, user_id, meal_date, status, amount) VALUES ($1, $2, $3, '予約', $4)`,
-                        [mealId, user_id, targetDate, mealFee]
+                        [mealId, user_id, d, mealFee]
                     );
                 }
             }
         }
 
-        // キャンセル処理（14日ルール）
         if (cancels && cancels.length > 0) {
             for (let d of cancels) {
                 const targetDate = new Date(d.replace(/-/g, '/'));
@@ -326,14 +325,13 @@ router.post('/user/meal/submit', async (req, res) => {
                 let resultStatus = '取消';
                 let resultFee = revokeFee;
                 
-                // 14日未満の場合は「キャンセル（500円）」にするロジック
                 if (diffDays < 14) {
                     resultStatus = 'キャンセル';
                     resultFee = cancelFee;
                 }
                 await pool.query(
                     `UPDATE fukushi_meals SET status = $1, amount = $2, situation = $1, updated_at = NOW() WHERE user_id = $3 AND meal_date = $4`,
-                    [resultStatus, resultFee, user_id, targetDate]
+                    [resultStatus, resultFee, user_id, d]
                 );
             }
         }
@@ -347,6 +345,7 @@ router.post('/user/meal/submit', async (req, res) => {
     }
 });
 
+module.exports = router;
 // ====================================================
 // ★ 確実なDB再構築のための専用API（ブラウザから直接叩く用）
 // ====================================================
