@@ -355,6 +355,8 @@ router.get('/setup-db', async (req, res) => {
         DROP TABLE IF EXISTS fukushi_schedule_details CASCADE;
         DROP TABLE IF EXISTS fukushi_schedules CASCADE;
         DROP TABLE IF EXISTS fukushi_meals CASCADE;
+        -- ★これだけ書き忘れていました！システム設定も確実にリセットします
+        DROP TABLE IF EXISTS fukushi_system_settings CASCADE;
 
         CREATE TABLE fukushi_schedules (
             plan_id VARCHAR(50) PRIMARY KEY,
@@ -392,7 +394,7 @@ router.get('/setup-db', async (req, res) => {
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
 
-        CREATE TABLE IF NOT EXISTS fukushi_system_settings (
+        CREATE TABLE fukushi_system_settings (
             setting_key VARCHAR(50) PRIMARY KEY,
             setting_value INTEGER NOT NULL
         );
