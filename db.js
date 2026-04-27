@@ -8,7 +8,8 @@ const dbConfig = {
 };
 
 if (process.env.INSTANCE_UNIX_SOCKET) {
-    dbConfig.host = process.env.INSTANCE_UNIX_SOCKET;
+    // ★ここが修正ポイントです（ `/cloudsql/` を付け足しました）
+    dbConfig.host = `/cloudsql/${process.env.INSTANCE_UNIX_SOCKET}`;
 } else {
     dbConfig.host = process.env.DB_HOST;
     dbConfig.port = process.env.DB_PORT;
