@@ -50,18 +50,48 @@ router.post('/user/login', async (req, res) => {
     }
 });
 
-// ====================================================
-// ★ 新規追加：利用者の一覧を取得するAPI（名前ボタン用）
-// ====================================================
+// 利用者の一覧を取得するAPI
 router.get('/users', async (req, res) => {
     try {
-        // PINコードは除外し、IDと名前だけを安全に取得（GASのスプレッドシート読み込みに相当）
         const result = await pool.query(
             'SELECT user_id, last_name, first_name FROM fukushi_users ORDER BY user_id ASC'
         );
         res.json({ success: true, users: result.rows });
     } catch (err) {
         console.error(err);
+        res.status(500).json({ success: false, message: 'サーバーエラーが発生しました' });
+    }
+});
+
+// ====================================================
+// ★ 新規追加：打刻データをデータベースに保存する機能
+// ====================================================
+
+// 1. プロ仕様の自動テーブル作成（Auto Migration）
+// ※サーバーが起動した際、打刻記録用のテーブルが無ければ自動で構築します
+const createAttendanceTable = `
+    CREATE TABLE IF NOT EXISTS fukushi_attendance (
+        id SERIAL PRIMARY KEY,
+        user_id VARCHAR(50) NOT NULL,
+        stamp_type VARCHAR(10) NOT NULL, -- 'in'(通所) または 'out'(退所)
+        stamp_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+`;
+pool.query(createAttendanceTable).catch(err => console.error("テーブル作成エラー:", err));
+
+// 2. 打刻を受け取るAPI
+router.post('/user/stamp', async (req, res) => {
+    // 画面から「誰が（user_id）」「どちらを押したか（stamp_type）」を受け取る
+    const { user_id, stamp_type } = req.body;
+    try {
+        // データベースに記録を挿入（時間はデータベースの現在時刻 NOW() を使って正確に記録します）
+        await pool.query(
+            'INSERT INTO fukushi_attendance (user_id, stamp_type, stamp_time) VALUES ($1, $2, NOW())',
+            [user_id, stamp_type]
+        );
+        res.json({ success: true, message: '打刻を正常に記録しました' });
+    } catch (err) {
+        console.error("打刻エラー:", err);
         res.status(500).json({ success: false, message: 'サーバーエラーが発生しました' });
     }
 });
