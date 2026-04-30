@@ -507,7 +507,69 @@ router.get('/user/today', async (req, res) => {
     }
 });
 
-module.exports = router;
+// ====================================================
+// ★ 管理者用機能API
+// ====================================================
+
+// 7. 指定日の全ユーザー予定・打刻・食事状況を取得するAPI（日別名簿）
+router.get('/admin/daily-roster', async (req, res) => {
+    const { date } = req.query; // "YYYY-MM-DD"形式
+    try {
+        // ユーザーマスタをベースに、その日の予定と食事を結合して取得
+        const query = `
+            SELECT 
+                u.user_id, u.last_name, u.first_name,
+                s.plan_id, s.plan_in, s.plan_out, s.act_in, s.act_out, s.status as schedule_status, s.note,
+                m.status as meal_status, m.situation as meal_situation
+            FROM fukushi_users u
+            LEFT JOIN fukushi_schedules s ON u.user_id = s.user_id AND s.plan_date = $1
+            LEFT JOIN fukushi_meals m ON u.user_id = m.user_id AND m.meal_date = $1
+            ORDER BY u.user_id ASC
+        `;
+        const result = await pool.query(query, [date]);
+
+        // 当日の打刻履歴をすべて取得（誰が「出勤」で誰が「退勤」かを判定するため）
+        const stamps = await pool.query(
+            `SELECT user_id, stamp_type, stamp_time 
+             FROM fukushi_attendance 
+             WHERE DATE(stamp_time) = $1 
+             ORDER BY stamp_time ASC`,
+            [date]
+        );
+
+        // ユーザーごとの最新打刻状態を整理
+        let stampMap = {};
+        stamps.rows.forEach(stamp => {
+            stampMap[stamp.user_id] = stamp.stamp_type; // 後の時間の打刻で上書きされるので最新が残る
+        });
+
+        // フロントエンドで表示しやすい形にデータを整形
+        const roster = result.rows.map(row => {
+            let meal = 'なし';
+            if (row.meal_situation) meal = row.meal_situation;
+            else if (row.meal_status) meal = row.meal_status;
+
+            return {
+                userId: row.user_id,
+                name: `${row.last_name} ${row.first_name}`,
+                planIn: row.plan_in ? row.plan_in.substring(0, 5) : '-',
+                planOut: row.plan_out ? row.plan_out.substring(0, 5) : '-',
+                actIn: row.act_in ? row.act_in.substring(0, 5) : '-',
+                actOut: row.act_out ? row.act_out.substring(0, 5) : '-',
+                scheduleStatus: row.schedule_status || '未登録',
+                note: row.note || '',
+                meal: meal,
+                currentStamp: stampMap[row.user_id] || '未打刻'
+            };
+        });
+
+        res.json({ success: true, roster });
+    } catch (err) {
+        console.error("日別一覧取得エラー:", err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 // ====================================================
 // ★ 確実なDB再構築のための専用API（ブラウザから直接叩く用）
 // ====================================================
@@ -573,4 +635,5 @@ router.get('/setup-db', async (req, res) => {
     }
 });
 
+// ★ 修正：二重になっていた export をファイルの一番最後、この1箇所だけにしました！
 module.exports = router;
