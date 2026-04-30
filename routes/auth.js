@@ -351,6 +351,76 @@ router.post('/user/meal/submit', async (req, res) => {
     }
 });
 
+// 4. 予定・打刻・食事の履歴一覧取得API
+router.get('/user/history/monthly', async (req, res) => {
+    const { user_id, year, month } = req.query;
+    try {
+        const y = parseInt(year, 10);
+        const m = parseInt(month, 10);
+        
+        const startDate = `${y}-${String(m).padStart(2, '0')}-01`;
+        const lastDay = new Date(y, m, 0).getDate();
+        const endDate = `${y}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+
+        // 予定データの取得
+        const scheduleResult = await pool.query(
+            `SELECT plan_id, TO_CHAR(plan_date, 'YYYY/MM/DD') as f_date, plan_in, plan_out, act_in, act_out, status, note 
+             FROM fukushi_schedules 
+             WHERE user_id = $1 AND plan_date >= $2 AND plan_date <= $3`,
+            [user_id, startDate, endDate]
+        );
+
+        // 食事データの取得
+        const mealResult = await pool.query(
+            `SELECT TO_CHAR(meal_date, 'YYYY/MM/DD') as f_date, status, situation 
+             FROM fukushi_meals 
+             WHERE user_id = $1 AND meal_date >= $2 AND meal_date <= $3`,
+            [user_id, startDate, endDate]
+        );
+
+        // 打刻実績の取得（※FacilityDashboard側との連動のため、fukushi_attendanceからも取得）
+        // ※act_in / act_out に直接入っている場合はそちらを優先しますが、
+        // 今回はシンプルにスケジュールテーブルに保存されている実績時間(act_in/act_out)をメインに使用します。
+        
+        // データの結合（マージ）
+        let historyMap = {};
+
+        // ① 予定データをベースにマップを作成
+        scheduleResult.rows.forEach(row => {
+            historyMap[row.f_date] = {
+                date: row.f_date,
+                planIn: row.plan_in ? row.plan_in.substring(0, 5) : '-',
+                planOut: row.plan_out ? row.plan_out.substring(0, 5) : '-',
+                actIn: row.act_in ? row.act_in.substring(0, 5) : '-',
+                actOut: row.act_out ? row.act_out.substring(0, 5) : '-',
+                status: row.status,
+                note: row.note || '',
+                mealStatus: 'なし'
+            };
+        });
+
+        // ② 食事データをマージ
+        mealResult.rows.forEach(row => {
+            const dStr = row.f_date;
+            if (!historyMap[dStr]) {
+                historyMap[dStr] = {
+                    date: dStr, planIn: '-', planOut: '-', actIn: '-', actOut: '-', status: '-', note: '', mealStatus: 'なし'
+                };
+            }
+            // situationがあればそれを、なければstatusをセット（GASの仕様踏襲）
+            historyMap[dStr].mealStatus = row.situation ? row.situation : row.status;
+        });
+
+        // 日付順（古い順）に並び替え
+        const list = Object.values(historyMap).sort((a, b) => (a.date > b.date ? 1 : -1));
+
+        res.json({ success: true, list: list });
+    } catch (err) {
+        console.error("履歴取得エラー:", err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 module.exports = router;
 // ====================================================
 // ★ 確実なDB再構築のための専用API（ブラウザから直接叩く用）
