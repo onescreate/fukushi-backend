@@ -421,6 +421,60 @@ router.get('/user/history/monthly', async (req, res) => {
     }
 });
 
+// 5. 予定の詳細（欠席・実習・中抜け）登録API
+router.post('/user/schedule/detail', async (req, res) => {
+    const { user_id, date, plan_in, plan_out, note, sub_events } = req.body;
+    // date: "YYYY-MM-DD"形式
+    
+    try {
+        await pool.query('BEGIN');
+
+        // ① まず、対象日の予定（fukushi_schedules）が存在するか確認し、更新する
+        const existCheck = await pool.query(
+            'SELECT plan_id FROM fukushi_schedules WHERE user_id = $1 AND plan_date = $2', 
+            [user_id, date]
+        );
+
+        let targetPlanId = '';
+
+        if (existCheck.rows.length > 0) {
+            targetPlanId = existCheck.rows[0].plan_id;
+            await pool.query(
+                `UPDATE fukushi_schedules SET plan_in = $1, plan_out = $2, note = $3, updated_at = NOW() WHERE plan_id = $4`,
+                [plan_in, plan_out, note, targetPlanId]
+            );
+        } else {
+            // 万が一予定がまだない日を直接詳細登録しようとした場合は新規作成
+            targetPlanId = 'A' + Date.now() + Math.floor(Math.random() * 1000);
+            await pool.query(
+                `INSERT INTO fukushi_schedules (plan_id, user_id, plan_date, plan_in, plan_out, status, note) VALUES ($1, $2, $3, $4, $5, '承認待ち', $6)`,
+                [targetPlanId, user_id, date, plan_in, plan_out, note]
+            );
+        }
+
+        // ② 古い詳細データ（中抜けなど）が既に登録されていれば一度削除する（上書きのため）
+        await pool.query('DELETE FROM fukushi_schedule_details WHERE plan_id = $1', [targetPlanId]);
+
+        // ③ 新しい詳細データ（中抜け）が送られてきている場合は追加する
+        if (sub_events && sub_events.length > 0) {
+            for (let ev of sub_events) {
+                const detailId = 'D' + Date.now() + Math.floor(Math.random() * 10000);
+                await pool.query(
+                    `INSERT INTO fukushi_schedule_details (detail_id, plan_id, event_type, event_detail, time_out, time_in) VALUES ($1, $2, $3, $4, $5, $6)`,
+                    [detailId, targetPlanId, ev.category, ev.detail, ev.start, ev.end]
+                );
+            }
+        }
+
+        await pool.query('COMMIT');
+        res.json({ success: true, message: '詳細データを保存しました' });
+    } catch (err) {
+        await pool.query('ROLLBACK');
+        console.error("詳細登録エラー:", err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 module.exports = router;
 // ====================================================
 // ★ 確実なDB再構築のための専用API（ブラウザから直接叩く用）
