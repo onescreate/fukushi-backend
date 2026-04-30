@@ -527,30 +527,35 @@ router.post('/admin/schedule/update-status', async (req, res) => {
 
 // 9. 管理者用：全ユーザーの予定申請一覧（日付順）取得API
 router.get('/admin/schedule-list', async (req, res) => {
-    const { date } = req.query; // フロントから「今日の日付」を正確に受け取る
+    const { date } = req.query; // フロントエンド（日本時間）から送られてきた日付
+    console.log("【Debug】Schedule List Requested for date >=:", date);
+
     try {
         const query = `
             SELECT 
-                s.plan_id, TO_CHAR(s.plan_date, 'YYYY/MM/DD') as f_date, s.plan_in, s.plan_out, s.status as schedule_status, s.note,
+                s.plan_id, 
+                TO_CHAR(s.plan_date, 'YYYY-MM-DD') as f_date, 
+                s.plan_in, s.plan_out, s.status as schedule_status, s.note,
                 u.user_id, u.last_name, u.first_name,
                 m.status as meal_status, m.situation as meal_situation
             FROM fukushi_schedules s
             LEFT JOIN fukushi_users u ON s.user_id = u.user_id
             LEFT JOIN fukushi_meals m ON s.user_id = m.user_id AND s.plan_date = m.meal_date
-            WHERE s.plan_date >= $1::DATE
+            WHERE s.plan_date >= $1::DATE  -- ここでキャストを確実に行う
             ORDER BY s.plan_date ASC, u.user_id ASC
         `;
         const result = await pool.query(query, [date]);
+        console.log("【Debug】Found records:", result.rows.length);
 
         const list = result.rows.map(row => ({
             planId: row.plan_id,
-            date: row.f_date,
-            name: `${row.last_name || ''} ${row.first_name || ''}`.trim() || '未登録ユーザー',
+            date: row.f_date.replace(/-/g, '/'), // 画面表示用に変換
+            name: `${row.last_name || ''} ${row.first_name || ''}`.trim(),
             planIn: row.plan_in ? row.plan_in.substring(0, 5) : '-',
             planOut: row.plan_out ? row.plan_out.substring(0, 5) : '-',
             status: row.schedule_status,
             note: row.note || '',
-            meal: row.meal_situation ? row.meal_situation : (row.meal_status ? row.meal_status : 'なし')
+            meal: row.meal_situation || row.meal_status || 'なし'
         }));
 
         res.json({ success: true, list });
@@ -560,7 +565,6 @@ router.get('/admin/schedule-list', async (req, res) => {
     }
 });
 
-// ※この下にもともとある module.exports = router; は消さないでください。
 
 // ====================================================
 // ★ 確実なDB再構築のための専用API（ブラウザから直接叩く用）
