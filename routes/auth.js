@@ -475,6 +475,38 @@ router.post('/user/schedule/detail', async (req, res) => {
     }
 });
 
+// 6. 施設タブレット用：今日の予定・食事取得API
+router.get('/user/today', async (req, res) => {
+    const { user_id, date } = req.query; // dateは "YYYY-MM-DD" で送られてくる
+    try {
+        const schedule = await pool.query(
+            "SELECT plan_in, plan_out FROM fukushi_schedules WHERE user_id = $1 AND plan_date = $2",
+            [user_id, date]
+        );
+        const meal = await pool.query(
+            "SELECT status, situation FROM fukushi_meals WHERE user_id = $1 AND meal_date = $2",
+            [user_id, date]
+        );
+
+        let planIn = '-', planOut = '-';
+        if (schedule.rows.length > 0) {
+            planIn = schedule.rows[0].plan_in ? schedule.rows[0].plan_in.substring(0, 5) : '-';
+            planOut = schedule.rows[0].plan_out ? schedule.rows[0].plan_out.substring(0, 5) : '-';
+        }
+
+        let mealStatus = 'なし';
+        if (meal.rows.length > 0) {
+            // situationがあればそれ（取消・キャンセル）、なければstatus（予約）
+            mealStatus = meal.rows[0].situation || meal.rows[0].status;
+        }
+
+        res.json({ success: true, today: { planIn, planOut, mealStatus } });
+    } catch (err) {
+        console.error("今日の予定取得エラー:", err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 module.exports = router;
 // ====================================================
 // ★ 確実なDB再構築のための専用API（ブラウザから直接叩く用）
