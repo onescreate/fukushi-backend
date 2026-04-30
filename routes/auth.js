@@ -550,6 +550,7 @@ router.get('/admin/daily-roster', async (req, res) => {
             else if (row.meal_status) meal = row.meal_status;
 
             return {
+                planId: row.plan_id, // ★この1行を追加！
                 userId: row.user_id,
                 name: `${row.last_name} ${row.first_name}`,
                 planIn: row.plan_in ? row.plan_in.substring(0, 5) : '-',
