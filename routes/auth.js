@@ -525,6 +525,40 @@ router.post('/admin/schedule/update-status', async (req, res) => {
     }
 });
 
+// 9. 管理者用：全ユーザーの予定申請一覧（日付順）取得API
+router.get('/admin/schedule-list', async (req, res) => {
+    try {
+        const query = `
+            SELECT 
+                s.plan_id, TO_CHAR(s.plan_date, 'YYYY/MM/DD') as f_date, s.plan_in, s.plan_out, s.status as schedule_status, s.note,
+                u.user_id, u.last_name, u.first_name,
+                m.status as meal_status, m.situation as meal_situation
+            FROM fukushi_schedules s
+            JOIN fukushi_users u ON s.user_id = u.user_id
+            LEFT JOIN fukushi_meals m ON u.user_id = m.user_id AND s.plan_date = m.meal_date
+            WHERE s.plan_date >= CURRENT_DATE -- 今日以降の予定をすべて表示
+            ORDER BY s.plan_date ASC, u.user_id ASC
+        `;
+        const result = await pool.query(query);
+
+        const list = result.rows.map(row => ({
+            planId: row.plan_id,
+            date: row.f_date,
+            name: `${row.last_name} ${row.first_name}`,
+            planIn: row.plan_in ? row.plan_in.substring(0, 5) : '-',
+            planOut: row.plan_out ? row.plan_out.substring(0, 5) : '-',
+            status: row.schedule_status,
+            note: row.note || '',
+            meal: row.meal_situation || row.meal_status || 'なし'
+        }));
+
+        res.json({ success: true, list });
+    } catch (err) {
+        console.error("一覧取得エラー:", err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 // ====================================================
 // ★ 確実なDB再構築のための専用API（ブラウザから直接叩く用）
 // ====================================================
