@@ -570,6 +570,26 @@ router.get('/admin/daily-roster', async (req, res) => {
     }
 });
 
+// 8. 管理者用：予定のステータス更新（承認・差戻し）API
+router.post('/admin/schedule/update-status', async (req, res) => {
+    const { plan_id, status } = req.body;
+    
+    if (!plan_id) {
+        return res.status(400).json({ success: false, error: "予定IDが指定されていません" });
+    }
+
+    try {
+        await pool.query(
+            'UPDATE fukushi_schedules SET status = $1, updated_at = NOW() WHERE plan_id = $2',
+            [status, plan_id]
+        );
+        res.json({ success: true, message: `ステータスを「${status}」に更新しました` });
+    } catch (err) {
+        console.error("ステータス更新エラー:", err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 // ====================================================
 // ★ 確実なDB再構築のための専用API（ブラウザから直接叩く用）
 // ====================================================
