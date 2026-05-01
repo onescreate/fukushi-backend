@@ -877,4 +877,22 @@ router.get('/admin/attendance/missing-count', async (req, res) => {
     }
 });
 
+// ★新規追加：打刻データ一覧からの安全な簡易編集API（食事や中抜けには触れない）
+router.post('/admin/attendance/update-time', async (req, res) => {
+    const { plan_id, plan_in, plan_out, act_in, act_out, note } = req.body;
+    try {
+        await pool.query(
+            `UPDATE fukushi_schedules 
+             SET plan_in = $1, plan_out = $2, act_in = $3, act_out = $4, note = $5, 
+                 updated_at = CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo' 
+             WHERE plan_id = $6`,
+            [plan_in || null, plan_out || null, act_in || null, act_out || null, note, plan_id]
+        );
+        res.json({ success: true });
+    } catch (err) {
+        console.error("打刻簡易編集エラー:", err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 module.exports = router;
