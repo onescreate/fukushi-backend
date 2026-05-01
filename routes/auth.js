@@ -907,4 +907,158 @@ router.post('/admin/attendance/update-time', async (req, res) => {
     }
 });
 
+// ====================================================
+// ★ 復旧：誤って消去してしまったデータ取得API群
+// ====================================================
+
+// 1. ダッシュボード用：日別名簿・打刻取得
+router.get('/admin/daily-roster', async (req, res) => {
+    const { date } = req.query;
+    try {
+        const query = `
+            SELECT 
+                u.user_id, u.last_name, u.first_name,
+                s.plan_id, s.plan_in, s.plan_out, s.act_in, s.act_out, s.status as schedule_status, s.note,
+                m.status as meal_status, m.situation as meal_situation
+            FROM fukushi_users u
+            LEFT JOIN fukushi_schedules s ON u.user_id = s.user_id AND s.plan_date = $1
+            LEFT JOIN fukushi_meals m ON u.user_id = m.user_id AND m.meal_date = $1
+            ORDER BY u.user_id ASC
+        `;
+        const result = await pool.query(query, [date]);
+
+        const stamps = await pool.query(
+            `SELECT user_id, stamp_type, TO_CHAR(stamp_time AT TIME ZONE 'Asia/Tokyo', 'HH24:MI') as t_str 
+             FROM fukushi_attendance 
+             WHERE TO_CHAR(stamp_time AT TIME ZONE 'Asia/Tokyo', 'YYYY-MM-DD') = $1 
+             ORDER BY stamp_time ASC`,
+            [date]
+        );
+
+        let stampMap = {};
+        let actInMap = {};
+        let actOutMap = {};
+
+        stamps.rows.forEach(stamp => {
+            stampMap[stamp.user_id] = stamp.stamp_type; 
+            if (stamp.stamp_type === 'in') {
+                if (!actInMap[stamp.user_id]) actInMap[stamp.user_id] = stamp.t_str; 
+            } else if (stamp.stamp_type === 'out') {
+                actOutMap[stamp.user_id] = stamp.t_str; 
+            }
+        });
+
+        const roster = result.rows.map(row => {
+            let meal = 'なし';
+            if (row.meal_situation) meal = row.meal_situation;
+            else if (row.meal_status) meal = row.meal_status;
+
+            const actualIn = row.act_in ? row.act_in.substring(0, 5) : (actInMap[row.user_id] || '');
+            const actualOut = row.act_out ? row.act_out.substring(0, 5) : (actOutMap[row.user_id] || '');
+
+            return {
+                planId: row.plan_id,
+                userId: row.user_id,
+                name: `${row.last_name} ${row.first_name}`,
+                planIn: row.plan_in ? row.plan_in.substring(0, 5) : '',
+                planOut: row.plan_out ? row.plan_out.substring(0, 5) : '',
+                actIn: actualIn,
+                actOut: actualOut,
+                scheduleStatus: row.schedule_status || '未登録',
+                note: row.note || '',
+                meal: meal,
+                currentStamp: stampMap[row.user_id] || '未打刻'
+            };
+        });
+        res.json({ success: true, roster });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// 2. ダッシュボード用：承認待ち一覧取得
+router.get('/admin/pending-approvals', async (req, res) => {
+    try {
+        const query = `
+            SELECT 
+                s.plan_id as id,
+                u.last_name || ' ' || u.first_name as user_name,
+                TO_CHAR(s.plan_date, 'YYYY-MM-DD') as date,
+                '予定変更' as type,
+                '通所時間: ' || COALESCE(s.plan_in, '--:--') || '〜' || COALESCE(s.plan_out, '--:--') as detail
+            FROM fukushi_schedules s
+            JOIN fukushi_users u ON s.user_id = u.user_id
+            WHERE s.status = '承認待ち'
+            ORDER BY s.plan_date ASC
+        `;
+        const result = await pool.query(query);
+        res.json({ success: true, list: result.rows, pendingList: result.rows });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// 3. 予定表一覧用：月間予定の全体取得
+router.get('/admin/schedule-list', async (req, res) => {
+    const { date } = req.query; 
+    try {
+        if (!date) return res.json({ success: true, list: [] });
+        const y = date.split('-')[0];
+        const m = date.split('-')[1];
+        const startDate = `${y}-${m}-01`;
+        const lastDay = new Date(y, m, 0).getDate();
+        const endDate = `${y}-${m}-${lastDay}`;
+
+        const query = `
+            SELECT 
+                TO_CHAR(s.plan_date, 'YYYY/MM/DD') as date,
+                u.last_name || ' ' || u.first_name as name,
+                s.plan_in as "planIn",
+                s.plan_out as "planOut",
+                COALESCE(m.status, 'なし') as meal,
+                s.status,
+                s.note
+            FROM fukushi_schedules s
+            JOIN fukushi_users u ON s.user_id = u.user_id
+            LEFT JOIN fukushi_meals m ON s.user_id = m.user_id AND s.plan_date = m.meal_date
+            WHERE s.plan_date >= $1 AND s.plan_date <= $2
+        `;
+        const result = await pool.query(query, [startDate, endDate]);
+        res.json({ success: true, list: result.rows });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// 4. 個人別予定取得（一括登録検索用）
+router.get('/user/schedule/monthly', async (req, res) => {
+    const { user_id, year, month } = req.query;
+    try {
+        const y = parseInt(year, 10);
+        const m = parseInt(month, 10);
+        const startDate = `${y}-${String(m).padStart(2, '0')}-01`;
+        const lastDay = new Date(y, m, 0).getDate();
+        const endDate = `${y}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+
+        const query = `
+            SELECT 
+                TO_CHAR(s.plan_date, 'YYYY/MM/DD') as date,
+                s.plan_in as "planIn",
+                s.plan_out as "planOut",
+                s.status,
+                s.note,
+                m.status as meal
+            FROM fukushi_schedules s
+            LEFT JOIN fukushi_meals m ON s.user_id = m.user_id AND s.plan_date = m.meal_date
+            WHERE s.user_id = $1 AND s.plan_date >= $2 AND s.plan_date <= $3
+        `;
+        const result = await pool.query(query, [user_id, startDate, endDate]);
+        let schedule = {};
+        result.rows.forEach(row => { schedule[row.date] = row; });
+        res.json({ success: true, schedule });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 module.exports = router;
