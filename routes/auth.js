@@ -448,4 +448,44 @@ router.post('/admin/attendance/update-detail', async (req, res) => {
     }
 });
 
+// ====================================================
+// ★ 復旧：食事の一括予約・取消API（監査ログ対応版）
+// ====================================================
+router.post('/user/meal/submit', async (req, res) => {
+    const { user_id, registers, cancels, operator } = req.body;
+    const opName = operator || '管理者';
+    try {
+        await pool.query('BEGIN');
+        const nowRes = await pool.query("SELECT CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo' as now_ts");
+        const now_ts = nowRes.rows[0].now_ts;
+
+        // ① 予約の処理（追加または更新）
+        if (registers && registers.length > 0) {
+            for (let d of registers) {
+                const existCheck = await pool.query('SELECT meal_id FROM fukushi_meals WHERE user_id = $1 AND meal_date = $2', [user_id, d]);
+                if (existCheck.rows.length > 0) {
+                    await pool.query(`UPDATE fukushi_meals SET status = '予約', situation = '予約', updated_by = $1, updated_at = $2 WHERE user_id = $3 AND meal_date = $4`, [opName, now_ts, user_id, d]);
+                } else {
+                    const mealId = 'M' + Date.now() + Math.floor(Math.random() * 1000);
+                    await pool.query(`INSERT INTO fukushi_meals (meal_id, user_id, meal_date, status, situation, created_by, updated_by, created_at, updated_at) VALUES ($1, $2, $3, '予約', '予約', $4, $4, $5, $5)`, [mealId, user_id, d, opName, now_ts]);
+                }
+            }
+        }
+
+        // ② 取消の処理（データの削除）
+        if (cancels && cancels.length > 0) {
+            for (let d of cancels) {
+                await pool.query('DELETE FROM fukushi_meals WHERE user_id = $1 AND meal_date = $2', [user_id, d]);
+            }
+        }
+
+        await pool.query('COMMIT');
+        res.json({ success: true });
+    } catch (err) {
+        await pool.query('ROLLBACK');
+        console.error("食事一括登録エラー:", err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 module.exports = router;
