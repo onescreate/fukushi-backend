@@ -75,15 +75,14 @@ router.post('/user/stamp', async (req, res) => {
     try {
         await pool.query('BEGIN');
         
-        // 1. 純粋な打刻ログに保存
+        // 1. 生ログに日本時間で記録
         await pool.query(
-            'INSERT INTO fukushi_attendance (user_id, stamp_type, stamp_time) VALUES ($1, $2, CURRENT_TIMESTAMP)',
+            "INSERT INTO fukushi_attendance (user_id, stamp_type, stamp_time) VALUES ($1, $2, CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')",
             [user_id, stamp_type]
         );
 
-        // 2. スケジュール実績枠（act_in / act_out）も同時に更新する
-        // DBの正確な現在時刻を取得（タイムゾーンのズレ防止）
-        const timeRes = await pool.query("SELECT TO_CHAR(CURRENT_TIMESTAMP, 'YYYY-MM-DD') as d_str, TO_CHAR(CURRENT_TIMESTAMP, 'HH24:MI') as t_str");
+        // 2. スケジュール実績枠を日本時間で更新
+        const timeRes = await pool.query("SELECT TO_CHAR(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo', 'YYYY-MM-DD') as d_str, TO_CHAR(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo', 'HH24:MI') as t_str");
         const dateStr = timeRes.rows[0].d_str;
         const timeStr = timeRes.rows[0].t_str;
 
@@ -92,23 +91,20 @@ router.post('/user/stamp', async (req, res) => {
         if (existCheck.rows.length > 0) {
             const plan = existCheck.rows[0];
             if (stamp_type === 'in' && !plan.act_in) {
-                // in の場合は、まだ記録がない時のみセット
-                await pool.query('UPDATE fukushi_schedules SET act_in = $1, updated_at = CURRENT_TIMESTAMP WHERE plan_id = $2', [timeStr, plan.plan_id]);
+                await pool.query("UPDATE fukushi_schedules SET act_in = $1, updated_at = CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo' WHERE plan_id = $2", [timeStr, plan.plan_id]);
             } else if (stamp_type === 'out') {
-                // out の場合は最新の退所時間で上書き
-                await pool.query('UPDATE fukushi_schedules SET act_out = $1, updated_at = CURRENT_TIMESTAMP WHERE plan_id = $2', [timeStr, plan.plan_id]);
+                await pool.query("UPDATE fukushi_schedules SET act_out = $1, updated_at = CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo' WHERE plan_id = $2", [timeStr, plan.plan_id]);
             }
         } else {
-            // 万が一予定が未登録だった場合に打刻した時の自動生成
             const planId = 'A' + Date.now() + Math.floor(Math.random() * 1000);
             if (stamp_type === 'in') {
                 await pool.query(
-                    `INSERT INTO fukushi_schedules (plan_id, user_id, plan_date, act_in, status) VALUES ($1, $2, $3, $4, '承認済')`,
+                    `INSERT INTO fukushi_schedules (plan_id, user_id, plan_date, act_in, status, created_at, updated_at) VALUES ($1, $2, $3, $4, '承認済', CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo', CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')`,
                     [planId, user_id, dateStr, timeStr]
                 );
             } else if (stamp_type === 'out') {
                 await pool.query(
-                    `INSERT INTO fukushi_schedules (plan_id, user_id, plan_date, act_out, status) VALUES ($1, $2, $3, $4, '承認済')`,
+                    `INSERT INTO fukushi_schedules (plan_id, user_id, plan_date, act_out, status, created_at, updated_at) VALUES ($1, $2, $3, $4, '承認済', CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo', CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')`,
                     [planId, user_id, dateStr, timeStr]
                 );
             }
@@ -208,7 +204,8 @@ router.get('/user/schedule/monthly', async (req, res) => {
 // 2. 予定の一括申請API（15日ルール・自動承認機能付き）
 router.post('/user/schedule/submit', async (req, res) => {
     const { user_id, dates, plan_in, plan_out, note } = req.body;
-    const now = new Date();
+    // 強制的に日本時間を取得
+    const now = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Tokyo" }));
     const currentYear = now.getFullYear();
     const currentMonth = now.getMonth();
     const currentDate = now.getDate();
@@ -264,7 +261,8 @@ router.post('/user/schedule/submit', async (req, res) => {
 // 3. 食事の予約・キャンセルAPI（14日キャンセル料ルール付き）
 router.post('/user/meal/submit', async (req, res) => {
     const { user_id, registers, cancels } = req.body;
-    const now = new Date();
+    // 強制的に日本時間を取得
+    const now = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Tokyo" }));
     const todayZero = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
     try {
@@ -500,11 +498,11 @@ router.get('/admin/daily-roster', async (req, res) => {
         `;
         const result = await pool.query(query, [date]);
 
-        // 生の打刻履歴から、最初のINと最後のOUTの時間も拾う
+        // 生の打刻履歴から、最初のINと最後のOUTの時間も拾う (日本時間に対応)
         const stamps = await pool.query(
-            `SELECT user_id, stamp_type, TO_CHAR(stamp_time, 'HH24:MI') as t_str 
+            `SELECT user_id, stamp_type, TO_CHAR(stamp_time AT TIME ZONE 'Asia/Tokyo', 'HH24:MI') as t_str 
              FROM fukushi_attendance 
-             WHERE DATE(stamp_time) = $1 
+             WHERE TO_CHAR(stamp_time AT TIME ZONE 'Asia/Tokyo', 'YYYY-MM-DD') = $1 
              ORDER BY stamp_time ASC`,
             [date]
         );
