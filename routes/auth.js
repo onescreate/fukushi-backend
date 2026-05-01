@@ -566,4 +566,27 @@ router.post('/admin/meal/delete', async (req, res) => {
     }
 });
 
+// ★新規追加：15時を過ぎても「予約」のままの食事注文数を取得（サイドバー通知用）
+router.get('/admin/meal/pending-count', async (req, res) => {
+    try {
+        // 日本時間の「今日」と「15時」を基準に、未処理の予約をカウント
+        const query = `
+            SELECT COUNT(*) 
+            FROM fukushi_meals 
+            WHERE status = '予約' 
+              AND (
+                meal_date < (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')::DATE 
+                OR 
+                (meal_date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')::DATE 
+                 AND (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')::TIME > '15:00:00')
+              )
+        `;
+        const result = await pool.query(query);
+        res.json({ success: true, count: parseInt(result.rows[0].count) });
+    } catch (err) {
+        console.error("食事通知カウントエラー:", err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 module.exports = router;
