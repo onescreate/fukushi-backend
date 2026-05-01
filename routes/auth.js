@@ -73,12 +73,51 @@ pool.query(createAttendanceTable).catch(err => console.error("テーブル作成
 router.post('/user/stamp', async (req, res) => {
     const { user_id, stamp_type } = req.body;
     try {
+        await pool.query('BEGIN');
+        
+        // 1. 純粋な打刻ログに保存
         await pool.query(
-            'INSERT INTO fukushi_attendance (user_id, stamp_type, stamp_time) VALUES ($1, $2, NOW())',
+            'INSERT INTO fukushi_attendance (user_id, stamp_type, stamp_time) VALUES ($1, $2, CURRENT_TIMESTAMP)',
             [user_id, stamp_type]
         );
+
+        // 2. スケジュール実績枠（act_in / act_out）も同時に更新する
+        // DBの正確な現在時刻を取得（タイムゾーンのズレ防止）
+        const timeRes = await pool.query("SELECT TO_CHAR(CURRENT_TIMESTAMP, 'YYYY-MM-DD') as d_str, TO_CHAR(CURRENT_TIMESTAMP, 'HH24:MI') as t_str");
+        const dateStr = timeRes.rows[0].d_str;
+        const timeStr = timeRes.rows[0].t_str;
+
+        const existCheck = await pool.query('SELECT plan_id, act_in FROM fukushi_schedules WHERE user_id = $1 AND plan_date = $2', [user_id, dateStr]);
+
+        if (existCheck.rows.length > 0) {
+            const plan = existCheck.rows[0];
+            if (stamp_type === 'in' && !plan.act_in) {
+                // in の場合は、まだ記録がない時のみセット
+                await pool.query('UPDATE fukushi_schedules SET act_in = $1, updated_at = CURRENT_TIMESTAMP WHERE plan_id = $2', [timeStr, plan.plan_id]);
+            } else if (stamp_type === 'out') {
+                // out の場合は最新の退所時間で上書き
+                await pool.query('UPDATE fukushi_schedules SET act_out = $1, updated_at = CURRENT_TIMESTAMP WHERE plan_id = $2', [timeStr, plan.plan_id]);
+            }
+        } else {
+            // 万が一予定が未登録だった場合に打刻した時の自動生成
+            const planId = 'A' + Date.now() + Math.floor(Math.random() * 1000);
+            if (stamp_type === 'in') {
+                await pool.query(
+                    `INSERT INTO fukushi_schedules (plan_id, user_id, plan_date, act_in, status) VALUES ($1, $2, $3, $4, '承認済')`,
+                    [planId, user_id, dateStr, timeStr]
+                );
+            } else if (stamp_type === 'out') {
+                await pool.query(
+                    `INSERT INTO fukushi_schedules (plan_id, user_id, plan_date, act_out, status) VALUES ($1, $2, $3, $4, '承認済')`,
+                    [planId, user_id, dateStr, timeStr]
+                );
+            }
+        }
+
+        await pool.query('COMMIT');
         res.json({ success: true, message: '打刻を正常に記録しました' });
     } catch (err) {
+        await pool.query('ROLLBACK');
         console.error("打刻エラー:", err);
         res.status(500).json({ success: false, message: 'サーバーエラー' });
     }
@@ -447,9 +486,8 @@ router.get('/user/today', async (req, res) => {
 
 // 7. 指定日の全ユーザー予定・打刻・食事状況を取得するAPI（日別名簿）
 router.get('/admin/daily-roster', async (req, res) => {
-    const { date } = req.query; // "YYYY-MM-DD"形式
+    const { date } = req.query;
     try {
-        // ユーザーマスタをベースに、その日の予定と食事を結合して取得
         const query = `
             SELECT 
                 u.user_id, u.last_name, u.first_name,
@@ -462,35 +500,45 @@ router.get('/admin/daily-roster', async (req, res) => {
         `;
         const result = await pool.query(query, [date]);
 
-        // 当日の打刻履歴をすべて取得（誰が「出勤」で誰が「退勤」かを判定するため）
+        // 生の打刻履歴から、最初のINと最後のOUTの時間も拾う
         const stamps = await pool.query(
-            `SELECT user_id, stamp_type, stamp_time 
+            `SELECT user_id, stamp_type, TO_CHAR(stamp_time, 'HH24:MI') as t_str 
              FROM fukushi_attendance 
              WHERE DATE(stamp_time) = $1 
              ORDER BY stamp_time ASC`,
             [date]
         );
 
-        // ユーザーごとの最新打刻状態を整理
         let stampMap = {};
+        let actInMap = {};
+        let actOutMap = {};
+
         stamps.rows.forEach(stamp => {
-            stampMap[stamp.user_id] = stamp.stamp_type; // 後の時間の打刻で上書きされるので最新が残る
+            stampMap[stamp.user_id] = stamp.stamp_type; 
+            if (stamp.stamp_type === 'in') {
+                if (!actInMap[stamp.user_id]) actInMap[stamp.user_id] = stamp.t_str; // 最初のIN
+            } else if (stamp.stamp_type === 'out') {
+                actOutMap[stamp.user_id] = stamp.t_str; // 最後のOUT
+            }
         });
 
-        // フロントエンドで表示しやすい形にデータを整形
         const roster = result.rows.map(row => {
             let meal = 'なし';
             if (row.meal_situation) meal = row.meal_situation;
             else if (row.meal_status) meal = row.meal_status;
 
+            // スケジュールに実績時間が手動入力されていればそれを優先、なければ生ログから補完
+            const actualIn = row.act_in ? row.act_in.substring(0, 5) : (actInMap[row.user_id] || '');
+            const actualOut = row.act_out ? row.act_out.substring(0, 5) : (actOutMap[row.user_id] || '');
+
             return {
-                planId: row.plan_id, // ★この1行を追加！
+                planId: row.plan_id,
                 userId: row.user_id,
                 name: `${row.last_name} ${row.first_name}`,
-                planIn: row.plan_in ? row.plan_in.substring(0, 5) : '-',
-                planOut: row.plan_out ? row.plan_out.substring(0, 5) : '-',
-                actIn: row.act_in ? row.act_in.substring(0, 5) : '-',
-                actOut: row.act_out ? row.act_out.substring(0, 5) : '-',
+                planIn: row.plan_in ? row.plan_in.substring(0, 5) : '',
+                planOut: row.plan_out ? row.plan_out.substring(0, 5) : '',
+                actIn: actualIn,
+                actOut: actualOut,
                 scheduleStatus: row.schedule_status || '未登録',
                 note: row.note || '',
                 meal: meal,
