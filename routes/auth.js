@@ -488,4 +488,82 @@ router.post('/user/meal/submit', async (req, res) => {
     }
 });
 
+// ====================================================
+// ★ 復旧＆拡張：食事注文リスト用 API群（監査ログ対応）
+// ====================================================
+
+// 1. 食事注文リスト一覧の取得
+router.get('/admin/meal-list', async (req, res) => {
+    const { year, month } = req.query;
+    try {
+        const y = parseInt(year, 10);
+        const m = parseInt(month, 10);
+        const startDate = `${y}-${String(m).padStart(2, '0')}-01`;
+        const lastDay = new Date(y, m, 0).getDate();
+        const endDate = `${y}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+
+        const query = `
+            SELECT m.meal_id, TO_CHAR(m.meal_date, 'YYYY-MM-DD') as f_date,
+                   m.status, m.amount as price, m.situation,
+                   u.user_id, u.last_name, u.first_name
+            FROM fukushi_meals m
+            JOIN fukushi_users u ON m.user_id = u.user_id
+            WHERE m.meal_date >= $1 AND m.meal_date <= $2
+            ORDER BY m.meal_date DESC, u.user_id ASC
+        `;
+        const result = await pool.query(query, [startDate, endDate]);
+        const list = result.rows.map(r => ({
+            id: r.meal_id, date: r.f_date, userId: r.user_id,
+            name: `${r.last_name} ${r.first_name}`,
+            status: r.status, price: r.price || 300, situation: r.situation || ''
+        }));
+        res.json({ success: true, list });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// 2. 食事注文の追加・編集 (保存)
+router.post('/admin/meal/save', async (req, res) => {
+    const { meal_id, user_id, date, status, price, situation, operator } = req.body;
+    const opName = operator || '管理者';
+    try {
+        const nowRes = await pool.query("SELECT CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo' as now_ts");
+        const now_ts = nowRes.rows[0].now_ts;
+
+        if (meal_id) {
+            // 編集（更新）
+            await pool.query(
+                `UPDATE fukushi_meals SET status = $1, amount = $2, situation = $3, updated_by = $4, updated_at = $5 WHERE meal_id = $6`,
+                [status, price, situation, opName, now_ts, meal_id]
+            );
+        } else {
+            // 新規追加
+            const exist = await pool.query('SELECT meal_id FROM fukushi_meals WHERE user_id = $1 AND meal_date = $2', [user_id, date]);
+            if (exist.rows.length > 0) {
+                return res.status(400).json({ success: false, message: '指定した日付の食事データは既に存在します。「変更」から編集してください。' });
+            }
+            const newId = 'M' + Date.now() + Math.floor(Math.random() * 1000);
+            await pool.query(
+                `INSERT INTO fukushi_meals (meal_id, user_id, meal_date, status, amount, situation, created_by, updated_by, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $8, $8)`,
+                [newId, user_id, date, status, price, situation, opName, now_ts]
+            );
+        }
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// 3. 食事注文の削除
+router.post('/admin/meal/delete', async (req, res) => {
+    const { meal_id } = req.body;
+    try {
+        await pool.query('DELETE FROM fukushi_meals WHERE meal_id = $1', [meal_id]);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 module.exports = router;
