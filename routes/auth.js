@@ -203,8 +203,8 @@ router.get('/user/schedule/monthly', async (req, res) => {
 
 // 2. 予定の一括申請API（15日ルール・自動承認機能付き）
 router.post('/user/schedule/submit', async (req, res) => {
-    const { user_id, dates, plan_in, plan_out, note } = req.body;
-    // 強制的に日本時間を取得
+    // ★修正: is_admin を受け取るように追加
+    const { user_id, dates, plan_in, plan_out, note, is_admin } = req.body;
     const now = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Tokyo" }));
     const currentYear = now.getFullYear();
     const currentMonth = now.getMonth();
@@ -213,24 +213,24 @@ router.post('/user/schedule/submit', async (req, res) => {
     try {
         await pool.query('BEGIN');
         for (let d of dates) {
-            // d は "2026-06-03" の形式
             const [yStr, mStr, dStr] = d.split('-');
             const targetYear = parseInt(yStr, 10);
-            const targetMonth = parseInt(mStr, 10) - 1; // JSの月は0始まり
+            const targetMonth = parseInt(mStr, 10) - 1; 
             
-            // ★修正：現在月との「月の差（何ヶ月先か）」を計算する
             const monthsDiff = (targetYear - currentYear) * 12 + (targetMonth - currentMonth);
             
             const existCheck = await pool.query('SELECT plan_id FROM fukushi_schedules WHERE user_id = $1 AND plan_date = $2', [user_id, d]);
             const isUpdate = existCheck.rows.length > 0;
 
-            // ★修正：翌々月以降（monthsDiff >= 2）は常に承認済。翌月は15日まで承認済。それ以外は承認待ち。
+            // ★修正: 管理者からの登録なら無条件で「承認済」。利用者なら15日ルール適用。
             let status = "承認待ち";
-            if (!isUpdate) {
+            if (is_admin) {
+                status = "承認済";
+            } else if (!isUpdate) {
                 if (monthsDiff >= 2) {
-                    status = "承認済"; // 翌々月以降は常に承認済
+                    status = "承認済"; 
                 } else if (monthsDiff === 1 && currentDate <= 15) {
-                    status = "承認済"; // 翌月分は15日まで承認済
+                    status = "承認済"; 
                 }
             }
 
@@ -238,13 +238,13 @@ router.post('/user/schedule/submit', async (req, res) => {
             
             if (isUpdate) {
                 await pool.query(
-                    `UPDATE fukushi_schedules SET plan_in = $1, plan_out = $2, note = $3, status = $4, updated_at = NOW() WHERE user_id = $5 AND plan_date = $6`,
+                    `UPDATE fukushi_schedules SET plan_in = $1, plan_out = $2, note = $3, status = $4, updated_at = CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo' WHERE user_id = $5 AND plan_date = $6`,
                     [plan_in, plan_out, reasonMsg, status, user_id, d]
                 );
             } else {
                 const planId = 'A' + Date.now() + Math.floor(Math.random() * 1000);
                 await pool.query(
-                    `INSERT INTO fukushi_schedules (plan_id, user_id, plan_date, plan_in, plan_out, status, note) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+                    `INSERT INTO fukushi_schedules (plan_id, user_id, plan_date, plan_in, plan_out, status, note, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo', CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')`,
                     [planId, user_id, d, plan_in, plan_out, status, reasonMsg]
                 );
             }
