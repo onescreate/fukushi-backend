@@ -620,7 +620,6 @@ router.get('/setup-db', async (req, res) => {
         DROP TABLE IF EXISTS fukushi_schedule_details CASCADE;
         DROP TABLE IF EXISTS fukushi_schedules CASCADE;
         DROP TABLE IF EXISTS fukushi_meals CASCADE;
-        -- ★これだけ書き忘れていました！システム設定も確実にリセットします
         DROP TABLE IF EXISTS fukushi_system_settings CASCADE;
 
         CREATE TABLE fukushi_schedules (
@@ -633,6 +632,10 @@ router.get('/setup-db', async (req, res) => {
             act_out TIME,
             status VARCHAR(20) DEFAULT '承認待ち',
             note TEXT,
+            created_by VARCHAR(50),      -- ★追加：作成者
+            updated_by VARCHAR(50),      -- ★追加：更新者
+            approved_by VARCHAR(50),     -- ★追加：承認者
+            approved_at TIMESTAMP,       -- ★追加：承認日時
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
@@ -645,7 +648,10 @@ router.get('/setup-db', async (req, res) => {
             time_out TIME,
             time_in TIME,
             status VARCHAR(20) DEFAULT '承認待ち',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_by VARCHAR(50),      -- ★追加：作成者
+            updated_by VARCHAR(50),      -- ★追加：更新者
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
 
         CREATE TABLE fukushi_meals (
@@ -655,6 +661,8 @@ router.get('/setup-db', async (req, res) => {
             status VARCHAR(20) DEFAULT '予約',
             amount INTEGER DEFAULT 300,
             situation VARCHAR(50),
+            created_by VARCHAR(50),      -- ★追加：作成者
+            updated_by VARCHAR(50),      -- ★追加：更新者
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
@@ -671,7 +679,7 @@ router.get('/setup-db', async (req, res) => {
 
     try {
         await pool.query(forceSetupSql);
-        res.json({ success: true, message: "データベースの再構築が完璧に完了しました！これでエラーは出ません。" });
+        res.json({ success: true, message: "データベースの再構築が完璧に完了しました！新しい監査カラムが追加されています。" });
     } catch (err) {
         res.json({ success: false, error: "テーブル作成失敗: " + err.message });
     }
