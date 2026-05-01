@@ -799,4 +799,62 @@ router.post('/admin/attendance/update-detail', async (req, res) => {
     }
 });
 
+// ====================================================
+// ★ 新機能：管理者向け 月間打刻・予定データ一覧取得API
+// ====================================================
+router.get('/admin/attendance-list', async (req, res) => {
+    const { year, month } = req.query;
+    try {
+        const y = parseInt(year, 10);
+        const m = parseInt(month, 10);
+        const startDate = `${y}-${String(m).padStart(2, '0')}-01`;
+        const lastDay = new Date(y, m, 0).getDate();
+        const endDate = `${y}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+
+        const query = `
+            SELECT 
+                s.plan_id, 
+                TO_CHAR(s.plan_date, 'YYYY-MM-DD') as f_date, 
+                s.plan_in, s.plan_out, s.act_in, s.act_out, s.status, s.note,
+                u.user_id, u.last_name, u.first_name
+            FROM fukushi_schedules s
+            JOIN fukushi_users u ON s.user_id = u.user_id
+            WHERE s.plan_date >= $1 AND s.plan_date <= $2
+            ORDER BY s.plan_date DESC, u.user_id ASC
+        `;
+        const result = await pool.query(query, [startDate, endDate]);
+
+        const list = result.rows.map(row => {
+            // ステータス（遅刻・早退・打刻漏れなど）の自動判定
+            let currentStatus = '正常';
+            if (row.note && row.note.includes('【欠席】')) {
+                currentStatus = '欠席';
+            } else if (!row.act_in && !row.act_out && row.status !== '承認待ち') {
+                currentStatus = '打刻漏れ';
+            } else if (row.plan_in && row.act_in && row.act_in > row.plan_in) {
+                currentStatus = '遅刻';
+            } else if (row.plan_out && row.act_out && row.act_out < row.plan_out) {
+                currentStatus = '早退';
+            }
+
+            return {
+                id: row.plan_id,
+                date: row.f_date, // "YYYY-MM-DD" で返してフロントのフィルターと一致させる
+                name: `${row.last_name} ${row.first_name}`,
+                planIn: row.plan_in ? row.plan_in.substring(0, 5) : '',
+                planOut: row.plan_out ? row.plan_out.substring(0, 5) : '',
+                actIn: row.act_in ? row.act_in.substring(0, 5) : '',
+                actOut: row.act_out ? row.act_out.substring(0, 5) : '',
+                status: currentStatus,
+                note: row.note || ''
+            };
+        });
+
+        res.json({ success: true, list });
+    } catch (err) {
+        console.error("打刻一覧取得エラー:", err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 module.exports = router;
