@@ -811,6 +811,7 @@ router.get('/admin/attendance-list', async (req, res) => {
         const lastDay = new Date(y, m, 0).getDate();
         const endDate = `${y}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
 
+        // ★修正：LEAST関数を使い、指定月末か「今日」の早い方まで（＝未来のデータを出さない）に制限
         const query = `
             SELECT 
                 s.plan_id, 
@@ -819,17 +820,18 @@ router.get('/admin/attendance-list', async (req, res) => {
                 u.user_id, u.last_name, u.first_name
             FROM fukushi_schedules s
             JOIN fukushi_users u ON s.user_id = u.user_id
-            WHERE s.plan_date >= $1 AND s.plan_date <= $2
+            WHERE s.plan_date >= $1 
+              AND s.plan_date <= LEAST($2::DATE, (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')::DATE)
             ORDER BY s.plan_date DESC, u.user_id ASC
         `;
         const result = await pool.query(query, [startDate, endDate]);
 
         const list = result.rows.map(row => {
-            // ステータス（遅刻・早退・打刻漏れなど）の自動判定
             let currentStatus = '正常';
             if (row.note && row.note.includes('【欠席】')) {
                 currentStatus = '欠席';
-            } else if (!row.act_in && !row.act_out && row.status !== '承認待ち') {
+            } else if ((!row.act_in || !row.act_out) && row.status !== '承認待ち') {
+                // ★修正：INまたはOUTどちらか一方が空なら「打刻漏れ」とする
                 currentStatus = '打刻漏れ';
             } else if (row.plan_in && row.act_in && row.act_in > row.plan_in) {
                 currentStatus = '遅刻';
@@ -839,7 +841,7 @@ router.get('/admin/attendance-list', async (req, res) => {
 
             return {
                 id: row.plan_id,
-                date: row.f_date, // "YYYY-MM-DD" で返してフロントのフィルターと一致させる
+                date: row.f_date,
                 name: `${row.last_name} ${row.first_name}`,
                 planIn: row.plan_in ? row.plan_in.substring(0, 5) : '',
                 planOut: row.plan_out ? row.plan_out.substring(0, 5) : '',
@@ -853,6 +855,24 @@ router.get('/admin/attendance-list', async (req, res) => {
         res.json({ success: true, list });
     } catch (err) {
         console.error("打刻一覧取得エラー:", err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// ★新規追加：全期間の打刻漏れ総数を取得するAPI（サイドバー通知用）
+router.get('/admin/attendance/missing-count', async (req, res) => {
+    try {
+        const query = `
+            SELECT COUNT(*) 
+            FROM fukushi_schedules 
+            WHERE (act_in IS NULL OR act_out IS NULL)
+              AND status = '承認済'
+              AND (note IS NULL OR (note NOT LIKE '%【欠席】%' AND note NOT LIKE '%【実習%'))
+              AND plan_date <= (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')::DATE
+        `;
+        const result = await pool.query(query);
+        res.json({ success: true, count: parseInt(result.rows[0].count) });
+    } catch (err) {
         res.status(500).json({ success: false, error: err.message });
     }
 });
