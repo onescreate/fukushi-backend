@@ -203,12 +203,12 @@ router.get('/user/schedule/monthly', async (req, res) => {
 
 // 2. 予定の一括申請API（15日ルール・自動承認機能付き）
 router.post('/user/schedule/submit', async (req, res) => {
-    // ★修正: is_admin を受け取るように追加
-    const { user_id, dates, plan_in, plan_out, note, is_admin } = req.body;
+    const { user_id, dates, plan_in, plan_out, note, is_admin, operator } = req.body;
     const now = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Tokyo" }));
     const currentYear = now.getFullYear();
     const currentMonth = now.getMonth();
     const currentDate = now.getDate();
+    const opName = operator || 'システム';
 
     try {
         await pool.query('BEGIN');
@@ -216,37 +216,38 @@ router.post('/user/schedule/submit', async (req, res) => {
             const [yStr, mStr, dStr] = d.split('-');
             const targetYear = parseInt(yStr, 10);
             const targetMonth = parseInt(mStr, 10) - 1; 
-            
             const monthsDiff = (targetYear - currentYear) * 12 + (targetMonth - currentMonth);
             
             const existCheck = await pool.query('SELECT plan_id FROM fukushi_schedules WHERE user_id = $1 AND plan_date = $2', [user_id, d]);
             const isUpdate = existCheck.rows.length > 0;
 
-            // ★修正: 管理者からの登録なら無条件で「承認済」。利用者なら15日ルール適用。
             let status = "承認待ち";
-            if (is_admin) {
-                status = "承認済";
-            } else if (!isUpdate) {
-                if (monthsDiff >= 2) {
-                    status = "承認済"; 
-                } else if (monthsDiff === 1 && currentDate <= 15) {
-                    status = "承認済"; 
-                }
+            if (is_admin) status = "承認済";
+            else if (!isUpdate) {
+                if (monthsDiff >= 2) status = "承認済"; 
+                else if (monthsDiff === 1 && currentDate <= 15) status = "承認済"; 
             }
 
             let reasonMsg = note || "";
             
             if (isUpdate) {
-                await pool.query(
-                    `UPDATE fukushi_schedules SET plan_in = $1, plan_out = $2, note = $3, status = $4, updated_at = CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo' WHERE user_id = $5 AND plan_date = $6`,
-                    [plan_in, plan_out, reasonMsg, status, user_id, d]
-                );
+                let uq = `UPDATE fukushi_schedules SET plan_in = $1, plan_out = $2, note = $3, status = $4, updated_by = $5, updated_at = CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo'`;
+                if (status === '承認済') uq += `, approved_by = $5, approved_at = CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo'`;
+                uq += ` WHERE user_id = $6 AND plan_date = $7`;
+                await pool.query(uq, [plan_in, plan_out, reasonMsg, status, opName, user_id, d]);
             } else {
                 const planId = 'A' + Date.now() + Math.floor(Math.random() * 1000);
-                await pool.query(
-                    `INSERT INTO fukushi_schedules (plan_id, user_id, plan_date, plan_in, plan_out, status, note, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo', CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')`,
-                    [planId, user_id, d, plan_in, plan_out, status, reasonMsg]
-                );
+                if (status === '承認済') {
+                    await pool.query(
+                        `INSERT INTO fukushi_schedules (plan_id, user_id, plan_date, plan_in, plan_out, status, note, created_by, updated_by, approved_by, approved_at, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8, $8, CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo', CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo', CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')`,
+                        [planId, user_id, d, plan_in, plan_out, status, reasonMsg, opName]
+                    );
+                } else {
+                    await pool.query(
+                        `INSERT INTO fukushi_schedules (plan_id, user_id, plan_date, plan_in, plan_out, status, note, created_by, updated_by, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8, CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo', CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')`,
+                        [planId, user_id, d, plan_in, plan_out, status, reasonMsg, opName]
+                    );
+                }
             }
         }
         await pool.query('COMMIT');
@@ -553,17 +554,20 @@ router.get('/admin/daily-roster', async (req, res) => {
 
 // 8. 管理者用：予定のステータス更新（承認・差戻し）API
 router.post('/admin/schedule/update-status', async (req, res) => {
-    const { plan_id, status } = req.body;
-    
-    if (!plan_id) {
-        return res.status(400).json({ success: false, error: "予定IDが指定されていません" });
-    }
+    const { plan_id, status, operator } = req.body;
+    if (!plan_id) return res.status(400).json({ success: false, error: "予定IDが指定されていません" });
 
     try {
-        await pool.query(
-            'UPDATE fukushi_schedules SET status = $1, updated_at = NOW() WHERE plan_id = $2',
-            [status, plan_id]
-        );
+        let updateQuery = `UPDATE fukushi_schedules SET status = $1, updated_by = $2, updated_at = CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo'`;
+        const params = [status, operator || '管理者', plan_id];
+        
+        // 承認された場合は、承認者と承認日時も記録する
+        if (status === '承認済') {
+            updateQuery += `, approved_by = $2, approved_at = CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo'`;
+        }
+        updateQuery += ` WHERE plan_id = $3`;
+        
+        await pool.query(updateQuery, params);
         res.json({ success: true, message: `ステータスを「${status}」に更新しました` });
     } catch (err) {
         console.error("ステータス更新エラー:", err);
@@ -691,17 +695,18 @@ router.get('/setup-db', async (req, res) => {
 
 // 1. 欠席処理 API
 router.post('/admin/attendance/absent', async (req, res) => {
-    const { userId, date, reason } = req.body;
+    const { userId, date, reason, operator } = req.body;
+    const opName = operator || '管理者';
     try {
         await pool.query('BEGIN');
         const existCheck = await pool.query('SELECT plan_id FROM fukushi_schedules WHERE user_id = $1 AND plan_date = $2', [userId, date]);
         const noteText = `【欠席】${reason || ''}`;
 
         if (existCheck.rows.length > 0) {
-            await pool.query(`UPDATE fukushi_schedules SET note = $1, updated_at = NOW() WHERE user_id = $2 AND plan_date = $3`, [noteText, userId, date]);
+            await pool.query(`UPDATE fukushi_schedules SET note = $1, updated_by = $2, updated_at = CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo' WHERE user_id = $3 AND plan_date = $4`, [noteText, opName, userId, date]);
         } else {
             const planId = 'A' + Date.now() + Math.floor(Math.random() * 1000);
-            await pool.query(`INSERT INTO fukushi_schedules (plan_id, user_id, plan_date, status, note) VALUES ($1, $2, $3, '承認済', $4)`, [planId, userId, date, noteText]);
+            await pool.query(`INSERT INTO fukushi_schedules (plan_id, user_id, plan_date, status, note, created_by, updated_by, approved_by, approved_at, created_at, updated_at) VALUES ($1, $2, $3, '承認済', $4, $5, $5, $5, CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo', CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo', CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')`, [planId, userId, date, noteText, opName]);
         }
         await pool.query('COMMIT');
         res.json({ success: true, message: "欠席処理が完了しました" });
@@ -714,26 +719,27 @@ router.post('/admin/attendance/absent', async (req, res) => {
 
 // 2. 食事状況の変更（代食含む） API
 router.post('/admin/meal/update-status', async (req, res) => {
-    const { userId, date, status, subUserId } = req.body;
+    const { userId, date, status, subUserId, operator } = req.body;
+    const opName = operator || '管理者';
     try {
         await pool.query('BEGIN');
         const existCheck = await pool.query('SELECT meal_id FROM fukushi_meals WHERE user_id = $1 AND meal_date = $2', [userId, date]);
         let targetStatus = status === '代食' ? 'キャンセル' : status;
 
         if (existCheck.rows.length > 0) {
-            await pool.query(`UPDATE fukushi_meals SET status = $1, situation = $1, updated_at = NOW() WHERE user_id = $2 AND meal_date = $3`, [targetStatus, userId, date]);
+            await pool.query(`UPDATE fukushi_meals SET status = $1, situation = $1, updated_by = $2, updated_at = CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo' WHERE user_id = $3 AND meal_date = $4`, [targetStatus, opName, userId, date]);
         } else if (targetStatus !== 'キャンセル' && targetStatus !== '取消') { 
             const mealId = 'M' + Date.now() + Math.floor(Math.random() * 1000);
-            await pool.query(`INSERT INTO fukushi_meals (meal_id, user_id, meal_date, status, situation) VALUES ($1, $2, $3, $4, $4)`, [mealId, userId, date, targetStatus]);
+            await pool.query(`INSERT INTO fukushi_meals (meal_id, user_id, meal_date, status, situation, created_by, updated_by, created_at, updated_at) VALUES ($1, $2, $3, $4, $4, $5, $5, CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo', CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')`, [mealId, userId, date, targetStatus, opName]);
         }
 
         if (status === '代食' && subUserId) {
             const subExistCheck = await pool.query('SELECT meal_id FROM fukushi_meals WHERE user_id = $1 AND meal_date = $2', [subUserId, date]);
             if (subExistCheck.rows.length > 0) {
-                await pool.query(`UPDATE fukushi_meals SET status = '予約', situation = '予約(代食)', updated_at = NOW() WHERE user_id = $1 AND meal_date = $2`, [subUserId, date]);
+                await pool.query(`UPDATE fukushi_meals SET status = '予約', situation = '予約(代食)', updated_by = $1, updated_at = CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo' WHERE user_id = $2 AND meal_date = $3`, [opName, subUserId, date]);
             } else {
                 const subMealId = 'M' + Date.now() + Math.floor(Math.random() * 1000);
-                await pool.query(`INSERT INTO fukushi_meals (meal_id, user_id, meal_date, status, situation) VALUES ($1, $2, $3, '予約', '予約(代食)')`, [subMealId, subUserId, date]);
+                await pool.query(`INSERT INTO fukushi_meals (meal_id, user_id, meal_date, status, situation, created_by, updated_by, created_at, updated_at) VALUES ($1, $2, $3, '予約', '予約(代食)', $4, $4, CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo', CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')`, [subMealId, subUserId, date, opName]);
             }
         }
         await pool.query('COMMIT');
@@ -749,8 +755,9 @@ router.post('/admin/meal/update-status', async (req, res) => {
 router.post('/admin/attendance/update-detail', async (req, res) => {
     const { 
         userId, date, attendanceType, planIn, planOut, actIn, actOut, 
-        meal, note, breakIn, breakOut, breakReason, breakDetailSelect, breakDetailText, trainingPlace 
+        meal, note, breakIn, breakOut, breakReason, breakDetailSelect, breakDetailText, trainingPlace, operator 
     } = req.body;
+    const opName = operator || '管理者';
 
     try {
         await pool.query('BEGIN');
@@ -764,10 +771,10 @@ router.post('/admin/attendance/update-detail', async (req, res) => {
 
         if (scheduleCheck.rows.length > 0) {
             targetPlanId = scheduleCheck.rows[0].plan_id;
-            await pool.query(`UPDATE fukushi_schedules SET plan_in = $1, plan_out = $2, act_in = $3, act_out = $4, note = $5, updated_at = NOW() WHERE plan_id = $6`, [planIn || null, planOut || null, actIn || null, actOut || null, finalNote, targetPlanId]);
+            await pool.query(`UPDATE fukushi_schedules SET plan_in = $1, plan_out = $2, act_in = $3, act_out = $4, note = $5, updated_by = $6, updated_at = CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo' WHERE plan_id = $7`, [planIn || null, planOut || null, actIn || null, actOut || null, finalNote, opName, targetPlanId]);
         } else {
             targetPlanId = 'A' + Date.now() + Math.floor(Math.random() * 1000);
-            await pool.query(`INSERT INTO fukushi_schedules (plan_id, user_id, plan_date, plan_in, plan_out, act_in, act_out, status, note) VALUES ($1, $2, $3, $4, $5, $6, $7, '承認済', $8)`, [targetPlanId, userId, date, planIn || null, planOut || null, actIn || null, actOut || null, finalNote]);
+            await pool.query(`INSERT INTO fukushi_schedules (plan_id, user_id, plan_date, plan_in, plan_out, act_in, act_out, status, note, created_by, updated_by, approved_by, approved_at, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, '承認済', $8, $9, $9, $9, CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo', CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo', CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')`, [targetPlanId, userId, date, planIn || null, planOut || null, actIn || null, actOut || null, finalNote, opName]);
         }
 
         // ② 中抜けデータの更新
@@ -777,24 +784,22 @@ router.post('/admin/attendance/update-detail', async (req, res) => {
             let eventDetail = breakReason;
             if (breakDetailSelect) eventDetail += ` (${breakDetailSelect})`;
             if (breakDetailText) eventDetail += `: ${breakDetailText}`;
-            await pool.query(`INSERT INTO fukushi_schedule_details (detail_id, plan_id, event_type, event_detail, time_out, time_in) VALUES ($1, $2, '中抜け', $3, $4, $5)`, [detailId, targetPlanId, eventDetail, breakIn, breakOut]);
+            await pool.query(`INSERT INTO fukushi_schedule_details (detail_id, plan_id, event_type, event_detail, time_out, time_in, created_by, updated_by, created_at, updated_at) VALUES ($1, $2, '中抜け', $3, $4, $5, $6, $6, CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo', CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')`, [detailId, targetPlanId, eventDetail, breakIn, breakOut, opName]);
         }
 
-        // ③ 食事の更新（★ 5択のロジックを完全反映）
+        // ③ 食事の更新
         const mealCheck = await pool.query('SELECT meal_id FROM fukushi_meals WHERE user_id = $1 AND meal_date = $2', [userId, date]);
         
         if (meal === 'なし') {
-            // 「なし」の場合はDBから記録を削除して「最初からなかったこと」にする
             if (mealCheck.rows.length > 0) {
                 await pool.query('DELETE FROM fukushi_meals WHERE user_id = $1 AND meal_date = $2', [userId, date]);
             }
         } else {
-            // それ以外（予約・喫食・キャンセル・取消）の場合は更新または新規作成
             if (mealCheck.rows.length > 0) {
-                await pool.query(`UPDATE fukushi_meals SET status = $1, situation = $1, updated_at = NOW() WHERE user_id = $2 AND meal_date = $3`, [meal, userId, date]);
+                await pool.query(`UPDATE fukushi_meals SET status = $1, situation = $1, updated_by = $2, updated_at = CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo' WHERE user_id = $3 AND meal_date = $4`, [meal, opName, userId, date]);
             } else {
                 const mealId = 'M' + Date.now() + Math.floor(Math.random() * 1000);
-                await pool.query(`INSERT INTO fukushi_meals (meal_id, user_id, meal_date, status, situation) VALUES ($1, $2, $3, $4, $4)`, [mealId, userId, date, meal]);
+                await pool.query(`INSERT INTO fukushi_meals (meal_id, user_id, meal_date, status, situation, created_by, updated_by, created_at, updated_at) VALUES ($1, $2, $3, $4, $4, $5, $5, CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo', CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')`, [mealId, userId, date, meal, opName]);
             }
         }
 
@@ -819,7 +824,7 @@ router.get('/admin/attendance-list', async (req, res) => {
         const lastDay = new Date(y, m, 0).getDate();
         const endDate = `${y}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
 
-        // ★修正：LEAST関数を使い、指定月末か「今日」の早い方まで（＝未来のデータを出さない）に制限
+        // ★未来のデータを出さない制限
         const query = `
             SELECT 
                 s.plan_id, 
@@ -839,7 +844,6 @@ router.get('/admin/attendance-list', async (req, res) => {
             if (row.note && row.note.includes('【欠席】')) {
                 currentStatus = '欠席';
             } else if ((!row.act_in || !row.act_out) && row.status !== '承認待ち') {
-                // ★修正：INまたはOUTどちらか一方が空なら「打刻漏れ」とする
                 currentStatus = '打刻漏れ';
             } else if (row.plan_in && row.act_in && row.act_in > row.plan_in) {
                 currentStatus = '遅刻';
@@ -885,16 +889,16 @@ router.get('/admin/attendance/missing-count', async (req, res) => {
     }
 });
 
-// ★新規追加：打刻データ一覧からの安全な簡易編集API（食事や中抜けには触れない）
+// ★新規追加：打刻データ一覧からの安全な簡易編集API
 router.post('/admin/attendance/update-time', async (req, res) => {
-    const { plan_id, plan_in, plan_out, act_in, act_out, note } = req.body;
+    const { plan_id, plan_in, plan_out, act_in, act_out, note, operator } = req.body;
     try {
         await pool.query(
             `UPDATE fukushi_schedules 
              SET plan_in = $1, plan_out = $2, act_in = $3, act_out = $4, note = $5, 
-                 updated_at = CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo' 
-             WHERE plan_id = $6`,
-            [plan_in || null, plan_out || null, act_in || null, act_out || null, note, plan_id]
+                 updated_by = $6, updated_at = CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo' 
+             WHERE plan_id = $7`,
+            [plan_in || null, plan_out || null, act_in || null, act_out || null, note, operator || '管理者', plan_id]
         );
         res.json({ success: true });
     } catch (err) {
