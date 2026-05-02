@@ -829,13 +829,13 @@ router.get('/admin/billing-list', async (req, res) => {
                 u.last_name, 
                 u.first_name,
                 COUNT(m.meal_id) as meal_count,
-                SUM(m.amount) as total_amount,
+                SUM(COALESCE(m.amount, 0)) as total_amount,
                 n.note
             FROM fukushi_users u
             JOIN fukushi_meals m ON u.user_id = m.user_id
             LEFT JOIN fukushi_billing_notes n ON u.user_id = n.user_id AND n.target_year = $3 AND n.target_month = $4
             WHERE m.meal_date >= $1 AND m.meal_date <= $2
-              AND m.amount > 0 
+              AND (m.amount > 0 OR m.status IN ('予約', '喫食済', 'キャンセル'))
             GROUP BY u.user_id, u.last_name, u.first_name, n.note
             ORDER BY u.user_id ASC
         `;
