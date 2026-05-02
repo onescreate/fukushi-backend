@@ -136,6 +136,60 @@ router.get('/setup-db', async (req, res) => {
 });
 
 // ====================================================
+// ★ インボイス・請求備考用テーブルの確実な作成API
+// （※既存データには影響しません）
+// ====================================================
+router.get('/setup-invoice-db', async (req, res) => {
+    try {
+        await pool.query('BEGIN');
+
+        // ① 請求者情報（インボイス）履歴テーブルの作成
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS fukushi_invoice_settings (
+                id SERIAL PRIMARY KEY,
+                company_name VARCHAR(100),
+                invoice_number VARCHAR(50),
+                postal_code VARCHAR(20),
+                address VARCHAR(200),
+                phone_number VARCHAR(20),
+                bank_info TEXT,
+                effective_date DATE NOT NULL,
+                created_by VARCHAR(50),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo'
+            );
+        `);
+
+        // ② 請求備考テーブルの作成
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS fukushi_billing_notes (
+                user_id VARCHAR(50) NOT NULL,
+                target_year INTEGER NOT NULL,
+                target_month INTEGER NOT NULL,
+                note TEXT,
+                PRIMARY KEY (user_id, target_year, target_month)
+            );
+        `);
+
+        // ③ インボイス設定の初期データ投入（空の場合のみ）
+        const resCount = await pool.query('SELECT count(*) FROM fukushi_invoice_settings');
+        if (resCount.rows[0].count === '0') {
+            await pool.query(`
+                INSERT INTO fukushi_invoice_settings 
+                (company_name, invoice_number, effective_date, created_by, created_at) 
+                VALUES ('法人名・事業所名', 'T0000000000000', '2000-01-01', 'system', CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')
+            `);
+        }
+
+        await pool.query('COMMIT');
+        res.json({ success: true, message: "インボイス設定および請求備考のテーブル作成が正常に完了しました。" });
+    } catch (err) {
+        await pool.query('ROLLBACK');
+        console.error("テーブル作成エラー:", err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// ====================================================
 // 2.4 インボイス設定（履歴管理対応）・請求備考テーブル
 // ====================================================
 pool.query(`
