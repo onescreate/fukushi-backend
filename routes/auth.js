@@ -136,6 +136,66 @@ router.get('/setup-db', async (req, res) => {
 });
 
 // ====================================================
+// 2.4 インボイス設定・請求備考テーブルの自動生成
+// ====================================================
+pool.query(`
+    CREATE TABLE IF NOT EXISTS fukushi_invoice_settings (
+        id SERIAL PRIMARY KEY,
+        company_name VARCHAR(100),
+        invoice_number VARCHAR(50),
+        postal_code VARCHAR(20),
+        address VARCHAR(200),
+        phone_number VARCHAR(20),
+        bank_info TEXT
+    );
+    CREATE TABLE IF NOT EXISTS fukushi_billing_notes (
+        user_id VARCHAR(50) NOT NULL,
+        target_year INTEGER NOT NULL,
+        target_month INTEGER NOT NULL,
+        note TEXT,
+        PRIMARY KEY (user_id, target_year, target_month)
+    );
+`).then(async () => {
+    const res = await pool.query('SELECT count(*) FROM fukushi_invoice_settings');
+    if (res.rows[0].count === '0') {
+        await pool.query("INSERT INTO fukushi_invoice_settings (id, company_name, invoice_number) VALUES (1, '法人名・事業所名', 'T0000000000000')");
+    }
+}).catch(err => console.error("インボイステーブル作成エラー:", err));
+
+// インボイス設定・備考用API
+router.get('/admin/settings/invoice', async (req, res) => {
+    try {
+        const result = await pool.query('SELECT * FROM fukushi_invoice_settings WHERE id = 1');
+        res.json({ success: true, settings: result.rows[0] || {} });
+    } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+router.post('/admin/settings/invoice', async (req, res) => {
+    const { company_name, invoice_number, postal_code, address, phone_number, bank_info } = req.body;
+    try {
+        await pool.query(`
+            UPDATE fukushi_invoice_settings 
+            SET company_name = $1, invoice_number = $2, postal_code = $3, address = $4, phone_number = $5, bank_info = $6 
+            WHERE id = 1
+        `, [company_name, invoice_number, postal_code, address, phone_number, bank_info]);
+        res.json({ success: true });
+    } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+router.post('/admin/billing/note', async (req, res) => {
+    const { user_id, year, month, note } = req.body;
+    try {
+        await pool.query(`
+            INSERT INTO fukushi_billing_notes (user_id, target_year, target_month, note) 
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (user_id, target_year, target_month) 
+            DO UPDATE SET note = EXCLUDED.note
+        `, [user_id, year, month, note]);
+        res.json({ success: true });
+    } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// ====================================================
 // 2.5 料金マスタの自動生成と設定API
 // ====================================================
 pool.query(`
@@ -676,7 +736,7 @@ router.get('/admin/meal/pending-count', async (req, res) => {
 });
 
 // ====================================================
-// ★ 修正版：食事料金請求リスト取得 API (確定済みのamountを集計)
+// ★ 修正版：食事料金請求リスト取得 API (確定済みのamountと備考を集計)
 // ====================================================
 router.get('/admin/billing-list', async (req, res) => {
     const { year, month } = req.query;
@@ -687,29 +747,30 @@ router.get('/admin/billing-list', async (req, res) => {
         const lastDay = new Date(y, m, 0).getDate();
         const endDate = `${y}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
 
-        // amountが0より大きいデータを集計（喫食、有料キャンセルなど）
         const query = `
             SELECT 
                 u.user_id, 
                 u.last_name, 
                 u.first_name,
                 COUNT(m.meal_id) as meal_count,
-                SUM(m.amount) as total_amount
+                SUM(m.amount) as total_amount,
+                n.note
             FROM fukushi_users u
             JOIN fukushi_meals m ON u.user_id = m.user_id
+            LEFT JOIN fukushi_billing_notes n ON u.user_id = n.user_id AND n.target_year = $3 AND n.target_month = $4
             WHERE m.meal_date >= $1 AND m.meal_date <= $2
               AND m.amount > 0 
-            GROUP BY u.user_id, u.last_name, u.first_name
+            GROUP BY u.user_id, u.last_name, u.first_name, n.note
             ORDER BY u.user_id ASC
         `;
         
-        const result = await pool.query(query, [startDate, endDate]);
-        
+        const result = await pool.query(query, [startDate, endDate, y, m]);
         const list = result.rows.map(r => ({
             userId: r.user_id,
             name: `${r.last_name} ${r.first_name}`,
             mealCount: parseInt(r.meal_count),
             totalAmount: parseInt(r.total_amount),
+            note: r.note || '',
             status: '未請求' 
         }));
 
