@@ -812,7 +812,7 @@ router.get('/admin/meal/pending-count', async (req, res) => {
 });
 
 // ====================================================
-// ★ 修正版：食事料金請求リスト取得 API (確定済みのamountと備考を集計)
+// ★ 修正版：食事料金請求リスト取得 API (ステータス基準で確実取得)
 // ====================================================
 router.get('/admin/billing-list', async (req, res) => {
     const { year, month } = req.query;
@@ -823,6 +823,7 @@ router.get('/admin/billing-list', async (req, res) => {
         const lastDay = new Date(y, m, 0).getDate();
         const endDate = `${y}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
 
+        // amountが0やNULLでも、「喫食済」「キャンセル」などの対象データなら確実に拾う
         const query = `
             SELECT 
                 u.user_id, 
@@ -835,7 +836,7 @@ router.get('/admin/billing-list', async (req, res) => {
             JOIN fukushi_meals m ON u.user_id = m.user_id
             LEFT JOIN fukushi_billing_notes n ON u.user_id = n.user_id AND n.target_year = $3 AND n.target_month = $4
             WHERE m.meal_date >= $1 AND m.meal_date <= $2
-              AND (m.amount > 0 OR m.status IN ('予約', '喫食済', 'キャンセル'))
+              AND m.status IN ('予約', '喫食済', 'キャンセル') 
             GROUP BY u.user_id, u.last_name, u.first_name, n.note
             ORDER BY u.user_id ASC
         `;
