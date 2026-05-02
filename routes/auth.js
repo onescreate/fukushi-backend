@@ -589,4 +589,50 @@ router.get('/admin/meal/pending-count', async (req, res) => {
     }
 });
 
+// ====================================================
+// ★ 復旧：食事料金請求リスト取得 API
+// ====================================================
+router.get('/admin/billing-list', async (req, res) => {
+    const { year, month } = req.query;
+    try {
+        const y = parseInt(year, 10);
+        const m = parseInt(month, 10);
+        // 月の初日と末日を計算
+        const startDate = `${y}-${String(m).padStart(2, '0')}-01`;
+        const lastDay = new Date(y, m, 0).getDate();
+        const endDate = `${y}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+
+        // 該当月の「喫食済」のデータをユーザーごとに集計するクエリ
+        const query = `
+            SELECT 
+                u.user_id, 
+                u.last_name, 
+                u.first_name,
+                COUNT(m.meal_id) as meal_count,
+                SUM(COALESCE(m.amount, 300)) as total_amount
+            FROM fukushi_users u
+            JOIN fukushi_meals m ON u.user_id = m.user_id
+            WHERE m.meal_date >= $1 AND m.meal_date <= $2
+              AND (m.status = '喫食済' OR m.situation = '喫食済')
+            GROUP BY u.user_id, u.last_name, u.first_name
+            ORDER BY u.user_id ASC
+        `;
+        
+        const result = await pool.query(query, [startDate, endDate]);
+        
+        const list = result.rows.map(r => ({
+            userId: r.user_id,
+            name: `${r.last_name} ${r.first_name}`,
+            mealCount: parseInt(r.meal_count),
+            totalAmount: parseInt(r.total_amount),
+            status: '未請求' // 今後の拡張用に固定で設定
+        }));
+
+        res.json({ success: true, list });
+    } catch (err) {
+        console.error("請求リスト取得エラー:", err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 module.exports = router;
