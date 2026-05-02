@@ -135,6 +135,49 @@ router.get('/setup-db', async (req, res) => {
     }
 });
 
+// ====================================================
+// 2.5 料金マスタの自動生成と設定API
+// ====================================================
+pool.query(`
+    CREATE TABLE IF NOT EXISTS fukushi_price_history (
+        id SERIAL PRIMARY KEY,
+        meal_fee INTEGER NOT NULL,
+        cancel_fee INTEGER NOT NULL,
+        effective_date DATE NOT NULL,
+        created_by VARCHAR(50),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+`).then(async () => {
+    const res = await pool.query('SELECT count(*) FROM fukushi_price_history');
+    if (res.rows[0].count === '0') {
+        await pool.query("INSERT INTO fukushi_price_history (meal_fee, cancel_fee, effective_date, created_by) VALUES (450, 500, '2000-01-01', 'system')");
+    }
+}).catch(err => console.error("料金テーブル作成エラー:", err));
+
+router.get('/admin/settings/price', async (req, res) => {
+    try {
+        const query = `SELECT * FROM fukushi_price_history ORDER BY effective_date DESC`;
+        const result = await pool.query(query);
+        res.json({ success: true, history: result.rows });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+router.post('/admin/settings/price', async (req, res) => {
+    const { meal_fee, cancel_fee, effective_date, operator } = req.body;
+    const opName = operator || '管理者';
+    try {
+        const nowRes = await pool.query("SELECT CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo' as now_ts");
+        await pool.query(
+            `INSERT INTO fukushi_price_history (meal_fee, cancel_fee, effective_date, created_by, created_at) VALUES ($1, $2, $3, $4, $5)`,
+            [meal_fee, cancel_fee, effective_date, opName, nowRes.rows[0].now_ts]
+        );
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
 
 // ====================================================
 // 3. 利用者からの入力 API (日本時間・監査ログ対応)
@@ -523,34 +566,77 @@ router.get('/admin/meal-list', async (req, res) => {
     }
 });
 
-// 2. 食事注文の追加・編集 (保存)
+// 2. 食事注文の追加・編集 (自動料金計算＆2週間ルール対応)
 router.post('/admin/meal/save', async (req, res) => {
-    const { meal_id, user_id, date, status, price, situation, operator } = req.body;
-    const opName = operator || '管理者';
+    const { meal_id, user_id, date, status, situation, is_admin, operator } = req.body;
+    const opName = operator || 'システム';
     try {
-        const nowRes = await pool.query("SELECT CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo' as now_ts");
-        const now_ts = nowRes.rows[0].now_ts;
+        await pool.query('BEGIN');
+        const nowRes = await pool.query("SELECT CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo' as now_ts, (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')::DATE as today");
+        const { now_ts, today } = nowRes.rows[0];
 
+        // ① 対象日の料金マスタを取得（適用開始日が対象日以前で最新のもの）
+        const priceRes = await pool.query(`SELECT meal_fee, cancel_fee FROM fukushi_price_history WHERE effective_date <= $1 ORDER BY effective_date DESC LIMIT 1`, [date]);
+        const masterMealFee = priceRes.rows.length > 0 ? priceRes.rows[0].meal_fee : 450;
+        const masterCancelFee = priceRes.rows.length > 0 ? priceRes.rows[0].cancel_fee : 500;
+
+        // ② ユーザーの個別料金 (special_meal_fee) を取得
+        let specialFee = 0;
+        try {
+            const userRes = await pool.query(`SELECT special_meal_fee FROM fukushi_users WHERE user_id = $1`, [user_id]);
+            if (userRes.rows.length > 0 && userRes.rows[0].special_meal_fee > 0) {
+                specialFee = userRes.rows[0].special_meal_fee;
+            }
+        } catch (e) { /* カラムがない場合は無視 */ }
+
+        // ③ 確定金額と確定ステータスの計算
+        let finalStatus = status;
+        let finalAmount = 0;
+
+        const targetDate = new Date(date);
+        const todayDate = new Date(today);
+        const diffDays = Math.floor((targetDate - todayDate) / (1000 * 60 * 60 * 24));
+
+        if (status === '取消' || status === 'キャンセル' || situation === 'キャンセル' || situation === '代替') {
+            if (is_admin && status === '取消') {
+                finalStatus = '取消';
+                finalAmount = 0;
+            } 
+            else if (diffDays >= 14) {
+                finalStatus = '取消';
+                finalAmount = 0;
+            } 
+            else {
+                finalStatus = 'キャンセル';
+                finalAmount = masterCancelFee;
+            }
+        } else {
+            finalAmount = specialFee > 0 ? specialFee : masterMealFee;
+        }
+
+        // ④ DBへ保存
         if (meal_id) {
-            // 編集（更新）
             await pool.query(
                 `UPDATE fukushi_meals SET status = $1, amount = $2, situation = $3, updated_by = $4, updated_at = $5 WHERE meal_id = $6`,
-                [status, price, situation, opName, now_ts, meal_id]
+                [finalStatus, finalAmount, situation, opName, now_ts, meal_id]
             );
         } else {
-            // 新規追加
             const exist = await pool.query('SELECT meal_id FROM fukushi_meals WHERE user_id = $1 AND meal_date = $2', [user_id, date]);
             if (exist.rows.length > 0) {
+                await pool.query('ROLLBACK');
                 return res.status(400).json({ success: false, message: '指定した日付の食事データは既に存在します。「変更」から編集してください。' });
             }
+            
             const newId = 'M' + Date.now() + Math.floor(Math.random() * 1000);
             await pool.query(
                 `INSERT INTO fukushi_meals (meal_id, user_id, meal_date, status, amount, situation, created_by, updated_by, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $8, $8)`,
-                [newId, user_id, date, status, price, situation, opName, now_ts]
+                [newId, user_id, date, finalStatus, finalAmount, situation, opName, now_ts]
             );
         }
+        await pool.query('COMMIT');
         res.json({ success: true });
     } catch (err) {
+        await pool.query('ROLLBACK');
         res.status(500).json({ success: false, error: err.message });
     }
 });
@@ -590,30 +676,29 @@ router.get('/admin/meal/pending-count', async (req, res) => {
 });
 
 // ====================================================
-// ★ 復旧：食事料金請求リスト取得 API
+// ★ 修正版：食事料金請求リスト取得 API (確定済みのamountを集計)
 // ====================================================
 router.get('/admin/billing-list', async (req, res) => {
     const { year, month } = req.query;
     try {
         const y = parseInt(year, 10);
         const m = parseInt(month, 10);
-        // 月の初日と末日を計算
         const startDate = `${y}-${String(m).padStart(2, '0')}-01`;
         const lastDay = new Date(y, m, 0).getDate();
         const endDate = `${y}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
 
-        // 該当月の「喫食済」のデータをユーザーごとに集計するクエリ
+        // amountが0より大きいデータを集計（喫食、有料キャンセルなど）
         const query = `
             SELECT 
                 u.user_id, 
                 u.last_name, 
                 u.first_name,
                 COUNT(m.meal_id) as meal_count,
-                SUM(COALESCE(m.amount, 300)) as total_amount
+                SUM(m.amount) as total_amount
             FROM fukushi_users u
             JOIN fukushi_meals m ON u.user_id = m.user_id
             WHERE m.meal_date >= $1 AND m.meal_date <= $2
-              AND (m.status = '喫食済' OR m.situation = '喫食済')
+              AND m.amount > 0 
             GROUP BY u.user_id, u.last_name, u.first_name
             ORDER BY u.user_id ASC
         `;
@@ -625,7 +710,7 @@ router.get('/admin/billing-list', async (req, res) => {
             name: `${r.last_name} ${r.first_name}`,
             mealCount: parseInt(r.meal_count),
             totalAmount: parseInt(r.total_amount),
-            status: '未請求' // 今後の拡張用に固定で設定
+            status: '未請求' 
         }));
 
         res.json({ success: true, list });
