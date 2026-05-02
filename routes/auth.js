@@ -136,7 +136,7 @@ router.get('/setup-db', async (req, res) => {
 });
 
 // ====================================================
-// 2.4 インボイス設定・請求備考テーブルの自動生成
+// 2.4 インボイス設定（履歴管理対応）・請求備考テーブル
 // ====================================================
 pool.query(`
     CREATE TABLE IF NOT EXISTS fukushi_invoice_settings (
@@ -146,7 +146,10 @@ pool.query(`
         postal_code VARCHAR(20),
         address VARCHAR(200),
         phone_number VARCHAR(20),
-        bank_info TEXT
+        bank_info TEXT,
+        effective_date DATE NOT NULL,
+        created_by VARCHAR(50),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
     CREATE TABLE IF NOT EXISTS fukushi_billing_notes (
         user_id VARCHAR(50) NOT NULL,
@@ -158,26 +161,45 @@ pool.query(`
 `).then(async () => {
     const res = await pool.query('SELECT count(*) FROM fukushi_invoice_settings');
     if (res.rows[0].count === '0') {
-        await pool.query("INSERT INTO fukushi_invoice_settings (id, company_name, invoice_number) VALUES (1, '法人名・事業所名', 'T0000000000000')");
+        await pool.query(`
+            INSERT INTO fukushi_invoice_settings 
+            (company_name, invoice_number, effective_date, created_by) 
+            VALUES ('法人名・事業所名', 'T0000000000000', '2000-01-01', 'system')
+        `);
     }
 }).catch(err => console.error("インボイステーブル作成エラー:", err));
 
-// インボイス設定・備考用API
-router.get('/admin/settings/invoice', async (req, res) => {
+// インボイス設定履歴の取得
+router.get('/admin/settings/invoice/history', async (req, res) => {
     try {
-        const result = await pool.query('SELECT * FROM fukushi_invoice_settings WHERE id = 1');
+        const result = await pool.query('SELECT * FROM fukushi_invoice_settings ORDER BY effective_date DESC');
+        res.json({ success: true, history: result.rows });
+    } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// 指定した日付時点で有効なインボイス設定を取得
+router.get('/admin/settings/invoice/active', async (req, res) => {
+    const { date } = req.query; // 対象月（例：2024-05-31）
+    try {
+        const result = await pool.query(
+            'SELECT * FROM fukushi_invoice_settings WHERE effective_date <= $1 ORDER BY effective_date DESC LIMIT 1',
+            [date]
+        );
         res.json({ success: true, settings: result.rows[0] || {} });
     } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
 
+// 新しいインボイス設定を履歴として保存
 router.post('/admin/settings/invoice', async (req, res) => {
-    const { company_name, invoice_number, postal_code, address, phone_number, bank_info } = req.body;
+    const { company_name, invoice_number, postal_code, address, phone_number, bank_info, effective_date, operator } = req.body;
+    const opName = operator || '管理者';
     try {
+        const nowRes = await pool.query("SELECT CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo' as now_ts");
         await pool.query(`
-            UPDATE fukushi_invoice_settings 
-            SET company_name = $1, invoice_number = $2, postal_code = $3, address = $4, phone_number = $5, bank_info = $6 
-            WHERE id = 1
-        `, [company_name, invoice_number, postal_code, address, phone_number, bank_info]);
+            INSERT INTO fukushi_invoice_settings 
+            (company_name, invoice_number, postal_code, address, phone_number, bank_info, effective_date, created_by, created_at) 
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        `, [company_name, invoice_number, postal_code, address, phone_number, bank_info, effective_date, opName, nowRes.rows[0].now_ts]);
         res.json({ success: true });
     } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
