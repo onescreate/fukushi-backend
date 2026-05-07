@@ -1096,4 +1096,37 @@ router.post('/admin/health-record/update', async (req, res) => {
     } catch (err) { res.status(500).json({ success: false }); }
 });
 
+// ====================================================
+// ★ テスト用：サンプル利用者追加API
+// ====================================================
+router.get('/setup-sample-users', async (req, res) => {
+    try {
+        // テスト用のPINコード「1234」を暗号化（ハッシュ化）
+        const hashedPin = await bcrypt.hash('1234', 10);
+        
+        // サンプルユーザーを3名追加（すでに同じIDがある場合は無視する安全設計）
+        await pool.query(`
+            INSERT INTO fukushi_users (user_id, last_name, first_name, pin_code, role)
+            VALUES 
+            ('U901', 'テスト', '太郎', $1, 'user'),
+            ('U902', 'サンプル', '花子', $1, 'user'),
+            ('U903', '確認', '次郎', $1, 'user')
+            ON CONFLICT (user_id) DO NOTHING;
+        `, [hashedPin]);
+        
+        res.json({ 
+            success: true, 
+            message: "サンプル利用者を3名追加しました。",
+            users: [
+                { id: 'U901', name: 'テスト 太郎', pin: '1234' },
+                { id: 'U902', name: 'サンプル 花子', pin: '1234' },
+                { id: 'U903', name: '確認 次郎', pin: '1234' }
+            ]
+        });
+    } catch (err) {
+        console.error("サンプルユーザー追加エラー:", err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 module.exports = router;
