@@ -204,45 +204,6 @@ router.get('/setup-invoice-db', async (req, res) => {
 });
 
 // ====================================================
-// ★ 納品管理テーブルの確実な作成・更新API（カラム追加版）
-// ====================================================
-router.get('/setup-delivery-db', async (req, res) => {
-    try {
-        await pool.query(`
-            CREATE TABLE IF NOT EXISTS fukushi_meal_deliveries (
-                delivery_date DATE PRIMARY KEY,
-                delivered_count INTEGER DEFAULT 0,
-                note TEXT,
-                created_by VARCHAR(50),
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-            
-            -- 既存テーブルがある場合に備え、カラムが存在しない場合のみ追加する処理
-            DO $$ 
-            BEGIN 
-                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fukushi_meal_deliveries' AND column_name='note') THEN
-                    ALTER TABLE fukushi_meal_deliveries ADD COLUMN note TEXT;
-                END IF;
-                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fukushi_meal_deliveries' AND column_name='created_by') THEN
-                    ALTER TABLE fukushi_meal_deliveries ADD COLUMN created_by VARCHAR(50);
-                END IF;
-                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fukushi_meal_deliveries' AND column_name='created_at') THEN
-                    ALTER TABLE fukushi_meal_deliveries ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
-                END IF;
-                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fukushi_meal_deliveries' AND column_name='updated_at') THEN
-                    ALTER TABLE fukushi_meal_deliveries ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
-                END IF;
-            END $$;
-        `);
-        res.json({ success: true, message: "食事納品管理用のテーブル構成（備考・登録者・日時等）を更新しました。" });
-    } catch (err) {
-        console.error("納品テーブル更新エラー:", err);
-        res.status(500).json({ success: false, error: err.message });
-    }
-});
-
-// ====================================================
 // ★ 健康管理（体重・BMI）テーブルの確実な作成・更新API
 // ====================================================
 router.get('/setup-health-db', async (req, res) => {
@@ -493,18 +454,20 @@ router.post('/user/schedule/submit', async (req, res) => {
 
 
 // ====================================================
-// 4. データ一覧取得 API
+// 4. データ一覧取得 API (店舗絞り込み対応)
 // ====================================================
 router.get('/admin/daily-roster', async (req, res) => {
-    const { date } = req.query;
+    const { date, store_id } = req.query;
+    const sId = store_id || 'all';
     try {
         const query = `
             SELECT u.user_id, u.last_name, u.first_name, s.plan_id, s.plan_in, s.plan_out, s.act_in, s.act_out, s.status as schedule_status, s.note, m.status as meal_status, m.situation as meal_situation
             FROM fukushi_users u
             LEFT JOIN fukushi_schedules s ON u.user_id = s.user_id AND s.plan_date = $1
             LEFT JOIN fukushi_meals m ON u.user_id = m.user_id AND m.meal_date = $1
+            WHERE ($2::text = 'all' OR u.store_id = $2)
             ORDER BY u.user_id ASC`;
-        const result = await pool.query(query, [date]);
+        const result = await pool.query(query, [date, sId]);
         const stamps = await pool.query(`SELECT user_id, stamp_type, TO_CHAR(stamp_time AT TIME ZONE 'Asia/Tokyo', 'HH24:MI') as t_str FROM fukushi_attendance WHERE TO_CHAR(stamp_time AT TIME ZONE 'Asia/Tokyo', 'YYYY-MM-DD') = $1 ORDER BY stamp_time ASC`, [date]);
         
         let actInMap = {}, actOutMap = {}, stampMap = {};
@@ -527,35 +490,42 @@ router.get('/admin/daily-roster', async (req, res) => {
 });
 
 router.get('/admin/pending-approvals', async (req, res) => {
+    const { store_id } = req.query;
+    const sId = store_id || 'all';
     try {
         const query = `SELECT s.plan_id as id, u.last_name || ' ' || u.first_name as user_name, TO_CHAR(s.plan_date, 'YYYY-MM-DD') as date, '予定変更' as type, '通所時間: ' || COALESCE(s.plan_in, '--:--') || '〜' || COALESCE(s.plan_out, '--:--') as detail
-            FROM fukushi_schedules s JOIN fukushi_users u ON s.user_id = u.user_id WHERE s.status = '承認待ち' ORDER BY s.plan_date ASC`;
-        const result = await pool.query(query);
+            FROM fukushi_schedules s JOIN fukushi_users u ON s.user_id = u.user_id 
+            WHERE s.status = '承認待ち' AND ($1::text = 'all' OR u.store_id = $1)
+            ORDER BY s.plan_date ASC`;
+        const result = await pool.query(query, [sId]);
         res.json({ success: true, list: result.rows });
     } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
 
 router.get('/admin/schedule-list', async (req, res) => {
-    const { date } = req.query;
+    const { date, store_id } = req.query;
+    const sId = store_id || 'all';
     try {
         const [y, m] = date.split('-');
         const query = `SELECT TO_CHAR(s.plan_date, 'YYYY/MM/DD') as date, u.last_name || ' ' || u.first_name as name, s.plan_in as "planIn", s.plan_out as "planOut", COALESCE(m.status, 'なし') as meal, s.status, s.note
             FROM fukushi_schedules s JOIN fukushi_users u ON s.user_id = u.user_id LEFT JOIN fukushi_meals m ON s.user_id = m.user_id AND s.plan_date = m.meal_date
-            WHERE s.plan_date >= $1 AND s.plan_date <= $2`;
-        const result = await pool.query(query, [`${y}-${m}-01`, `${y}-${m}-31`]);
+            WHERE s.plan_date >= $1 AND s.plan_date <= $2 AND ($3::text = 'all' OR u.store_id = $3)`;
+        const result = await pool.query(query, [`${y}-${m}-01`, `${y}-${m}-31`, sId]);
         res.json({ success: true, list: result.rows });
     } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
 
 router.get('/admin/attendance-list', async (req, res) => {
-    const { year, month } = req.query;
+    const { year, month, store_id } = req.query;
+    const sId = store_id || 'all';
     try {
         const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
         const query = `SELECT s.plan_id, TO_CHAR(s.plan_date, 'YYYY-MM-DD') as f_date, s.plan_in, s.plan_out, s.act_in, s.act_out, s.status, s.note, u.last_name, u.first_name
             FROM fukushi_schedules s JOIN fukushi_users u ON s.user_id = u.user_id
             WHERE s.plan_date >= $1 AND s.plan_date <= (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')::DATE
+            AND ($2::text = 'all' OR u.store_id = $2)
             ORDER BY s.plan_date DESC, u.user_id ASC`;
-        const result = await pool.query(query, [startDate]);
+        const result = await pool.query(query, [startDate, sId]);
         const list = result.rows.map(r => ({
             id: r.plan_id, date: r.f_date, name: `${r.last_name} ${r.first_name}`,
             planIn: r.plan_in ? r.plan_in.substring(0, 5) : '', planOut: r.plan_out ? r.plan_out.substring(0, 5) : '',
@@ -568,9 +538,13 @@ router.get('/admin/attendance-list', async (req, res) => {
 });
 
 router.get('/admin/attendance/missing-count', async (req, res) => {
+    const { store_id } = req.query;
+    const sId = store_id || 'all';
     try {
-        const query = `SELECT COUNT(*) FROM fukushi_schedules WHERE (act_in IS NULL OR act_out IS NULL) AND status = '承認済' AND (note IS NULL OR note NOT LIKE '%【欠席】%') AND plan_date <= (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')::DATE`;
-        const result = await pool.query(query);
+        const query = `SELECT COUNT(*) FROM fukushi_schedules s JOIN fukushi_users u ON s.user_id = u.user_id 
+        WHERE (s.act_in IS NULL OR s.act_out IS NULL) AND s.status = '承認済' AND (s.note IS NULL OR s.note NOT LIKE '%【欠席】%') AND s.plan_date <= (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')::DATE
+        AND ($1::text = 'all' OR u.store_id = $1)`;
+        const result = await pool.query(query, [sId]);
         res.json({ success: true, count: parseInt(result.rows[0].count) });
     } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
@@ -759,7 +733,8 @@ router.post('/user/meal/submit', async (req, res) => {
 
 // 1. 食事注文リスト一覧の取得
 router.get('/admin/meal-list', async (req, res) => {
-    const { year, month } = req.query;
+    const { year, month, store_id } = req.query;
+    const sId = store_id || 'all';
     try {
         const y = parseInt(year, 10);
         const m = parseInt(month, 10);
@@ -774,18 +749,17 @@ router.get('/admin/meal-list', async (req, res) => {
             FROM fukushi_meals m
             JOIN fukushi_users u ON m.user_id = u.user_id
             WHERE m.meal_date >= $1 AND m.meal_date <= $2
+              AND ($3::text = 'all' OR u.store_id = $3)
             ORDER BY m.meal_date DESC, u.user_id ASC
         `;
-        const result = await pool.query(query, [startDate, endDate]);
+        const result = await pool.query(query, [startDate, endDate, sId]);
         const list = result.rows.map(r => ({
             id: r.meal_id, date: r.f_date, userId: r.user_id,
             name: `${r.last_name} ${r.first_name}`,
             status: r.status, price: r.price || 300, situation: r.situation || ''
         }));
         res.json({ success: true, list });
-    } catch (err) {
-        res.status(500).json({ success: false, error: err.message });
-    }
+    } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
 
 // 2. 食事注文の追加・編集 (自動料金計算＆2週間ルール対応)
@@ -898,10 +872,11 @@ router.get('/admin/meal/pending-count', async (req, res) => {
 });
 
 // ====================================================
-// ★ 修正版：食事料金請求リスト取得 API (予約放置データのキャンセル料計算対応)
+// ★ 修正版：食事料金請求リスト取得 API
 // ====================================================
 router.get('/admin/billing-list', async (req, res) => {
-    const { year, month } = req.query;
+    const { year, month, store_id } = req.query;
+    const sId = store_id || 'all';
     try {
         const y = parseInt(year, 10);
         const m = parseInt(month, 10);
@@ -909,71 +884,81 @@ router.get('/admin/billing-list', async (req, res) => {
         const lastDay = new Date(y, m, 0).getDate();
         const endDate = `${y}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
 
-        // ロジック：予約のまま(過去、または今日15時以降)ならキャンセル料を適用。それ以外は確定済みのamountを使用。
         const query = `
             SELECT 
-                u.user_id, 
-                u.last_name, 
-                u.first_name,
+                u.user_id, u.last_name, u.first_name,
                 COUNT(m.meal_id) as meal_count,
                 SUM(
                     CASE 
-                        WHEN m.status = '予約' AND (
-                            m.meal_date < (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')::DATE 
-                            OR 
-                            (m.meal_date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')::DATE 
-                             AND (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')::TIME > '15:00:00')
-                        ) THEN 
-                            (SELECT cancel_fee FROM fukushi_price_history ph 
-                             WHERE ph.effective_date <= m.meal_date 
-                             ORDER BY ph.effective_date DESC LIMIT 1)
+                        WHEN m.status = '予約' AND (m.meal_date < (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')::DATE OR (m.meal_date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')::DATE AND (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')::TIME > '15:00:00')) THEN 
+                            (SELECT cancel_fee FROM fukushi_price_history ph WHERE ph.effective_date <= m.meal_date ORDER BY ph.effective_date DESC LIMIT 1)
                         ELSE COALESCE(m.amount, 0) 
                     END
                 ) as total_amount,
-                (SELECT note FROM fukushi_billing_notes n 
-                 WHERE n.user_id = u.user_id AND n.target_year = $3 AND n.target_month = $4 LIMIT 1) as note
+                (SELECT note FROM fukushi_billing_notes n WHERE n.user_id = u.user_id AND n.target_year = $3 AND n.target_month = $4 LIMIT 1) as note
             FROM fukushi_users u
             JOIN fukushi_meals m ON u.user_id = m.user_id
             WHERE m.meal_date >= $1 AND m.meal_date <= $2
               AND m.status IN ('予約', '喫食済', 'キャンセル') 
+              AND ($5::text = 'all' OR u.store_id = $5)
             GROUP BY u.user_id, u.last_name, u.first_name
             ORDER BY u.user_id ASC
         `;
-        
-        const result = await pool.query(query, [startDate, endDate, y, m]);
+        const result = await pool.query(query, [startDate, endDate, y, m, sId]);
         const list = result.rows.map(r => ({
-            userId: r.user_id,
-            name: `${r.last_name} ${r.first_name}`,
-            mealCount: parseInt(r.meal_count),
-            totalAmount: parseInt(r.total_amount),
-            note: r.note || '',
-            status: '未請求' 
+            userId: r.user_id, name: `${r.last_name} ${r.first_name}`,
+            mealCount: parseInt(r.meal_count), totalAmount: parseInt(r.total_amount),
+            note: r.note || '', status: '未請求' 
         }));
-
         res.json({ success: true, list });
+    } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// ====================================================
+// ★ 納品管理テーブルの確実な作成・更新API（店舗対応版）
+// ====================================================
+router.get('/setup-delivery-db', async (req, res) => {
+    try {
+        // 新規作成時の設計（店舗IDを含む複合主キー）
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS fukushi_meal_deliveries (
+                delivery_date DATE NOT NULL,
+                store_id VARCHAR(50) NOT NULL DEFAULT 'all',
+                delivered_count INTEGER DEFAULT 0,
+                note TEXT,
+                created_by VARCHAR(50),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (delivery_date, store_id)
+            );
+        `);
+        
+        // 既存テーブル（単一主キー）が存在する場合の安全な移行処理
+        await pool.query(`
+            DO $$ 
+            BEGIN 
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fukushi_meal_deliveries' AND column_name='store_id') THEN
+                    -- カラムを追加
+                    ALTER TABLE fukushi_meal_deliveries ADD COLUMN store_id VARCHAR(50) DEFAULT 'all';
+                    -- 既存の古い主キー制約を削除して、新しい複合主キーを再設定
+                    ALTER TABLE fukushi_meal_deliveries DROP CONSTRAINT IF EXISTS fukushi_meal_deliveries_pkey CASCADE;
+                    ALTER TABLE fukushi_meal_deliveries ADD PRIMARY KEY (delivery_date, store_id);
+                END IF;
+            END $$;
+        `);
+        res.json({ success: true, message: "食事納品管理用のテーブル構成（店舗対応版）を更新しました。" });
     } catch (err) {
-        console.error("請求リスト取得エラー:", err);
-        res.status(500).json({ success: false, error: "請求データの集計に失敗しました。" });
+        console.error("納品テーブル更新エラー:", err);
+        res.status(500).json({ success: false, error: err.message });
     }
 });
 
 // ====================================================
-// ★ 食事納品管理用テーブルの自動生成
-// ====================================================
-pool.query(`
-    CREATE TABLE IF NOT EXISTS fukushi_meal_deliveries (
-        delivery_date DATE PRIMARY KEY,
-        delivered_count INTEGER DEFAULT 0,
-        updated_by VARCHAR(50),
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-`).catch(err => console.error("納品テーブル作成エラー:", err));
-
-// ====================================================
-// ★ 修正版：食事納品管理（タイムゾーン・集計バグ修正版）
+// ★ 修正版：食事納品管理（店舗絞り込み対応）
 // ====================================================
 router.get('/admin/meal-delivery/monthly', async (req, res) => {
-    const { year, month } = req.query;
+    const { year, month, store_id } = req.query;
+    const sId = store_id || 'all'; // 店舗指定がない場合は 'all'
     try {
         const y = parseInt(year, 10);
         const m = parseInt(month, 10);
@@ -981,32 +966,32 @@ router.get('/admin/meal-delivery/monthly', async (req, res) => {
         const lastDay = new Date(y, m, 0).getDate();
         const endDate = `${y}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
 
-        // 1. 発注数：DB側で文字列(YYYY-MM-DD)に変換してから集計（ズレを防止）
-        // 予約・喫食済・キャンセル（厨房が準備すべき数）をカウント
+        // 1. 発注数：店舗で絞り込み
         const orderQuery = `
-            SELECT TO_CHAR(meal_date, 'YYYY-MM-DD') as d_date, COUNT(*) as count 
-            FROM fukushi_meals 
-            WHERE meal_date >= $1 AND meal_date <= $2 
-              AND status IN ('予約', '喫食済', 'キャンセル') 
-            GROUP BY meal_date
+            SELECT TO_CHAR(m.meal_date, 'YYYY-MM-DD') as d_date, COUNT(*) as count 
+            FROM fukushi_meals m
+            JOIN fukushi_users u ON m.user_id = u.user_id
+            WHERE m.meal_date >= $1 AND m.meal_date <= $2 
+              AND m.status IN ('予約', '喫食済', 'キャンセル') 
+              AND ($3::text = 'all' OR u.store_id = $3)
+            GROUP BY m.meal_date
         `;
-        const orderRes = await pool.query(orderQuery, [startDate, endDate]);
+        const orderRes = await pool.query(orderQuery, [startDate, endDate, sId]);
 
-        // 2. 納品数：こちらも文字列で取得
+        // 2. 納品数：店舗で絞り込み
         const deliveryQuery = `
             SELECT TO_CHAR(delivery_date, 'YYYY-MM-DD') as d_date, delivered_count 
             FROM fukushi_meal_deliveries 
             WHERE delivery_date >= $1 AND delivery_date <= $2
+              AND ($3::text = 'all' OR store_id = $3)
         `;
-        const deliveryRes = await pool.query(deliveryQuery, [startDate, endDate]);
+        const deliveryRes = await pool.query(deliveryQuery, [startDate, endDate, sId]);
 
         // 3. マージ処理
         const summary = {};
-        // まず発注数をセット
         orderRes.rows.forEach(r => {
             summary[r.d_date] = { orderCount: parseInt(r.count), deliveryCount: 0 };
         });
-        // 次に納品数を上書き・追加
         deliveryRes.rows.forEach(r => {
             if (!summary[r.d_date]) {
                 summary[r.d_date] = { orderCount: 0, deliveryCount: parseInt(r.delivered_count) };
@@ -1023,23 +1008,23 @@ router.get('/admin/meal-delivery/monthly', async (req, res) => {
 });
 
 router.post('/admin/meal-delivery/save', async (req, res) => {
-    const { date, deliveredCount, orderedCount, note, operator } = req.body;
+    const { date, deliveredCount, orderedCount, note, operator, store_id } = req.body;
+    const sId = store_id || 'all'; // 店舗指定がない場合は 'all'
     try {
-        // 差異がある場合の備考必須チェック
         if (parseInt(deliveredCount) !== parseInt(orderedCount) && (!note || note.trim() === '')) {
             return res.status(400).json({ success: false, error: '発注数と納品数に差異があるため、備考を入力してください。' });
         }
 
         await pool.query(`
-            INSERT INTO fukushi_meal_deliveries (delivery_date, delivered_count, note, created_by, updated_at)
-            VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
-            ON CONFLICT (delivery_date) 
+            INSERT INTO fukushi_meal_deliveries (delivery_date, store_id, delivered_count, note, created_by, updated_at)
+            VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
+            ON CONFLICT (delivery_date, store_id) 
             DO UPDATE SET 
                 delivered_count = EXCLUDED.delivered_count, 
                 note = EXCLUDED.note,
                 created_by = EXCLUDED.created_by,
                 updated_at = CURRENT_TIMESTAMP
-        `, [date, deliveredCount, note, operator || '管理者']);
+        `, [date, sId, deliveredCount, note, operator || '管理者']);
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
@@ -1107,10 +1092,11 @@ router.post('/user/health-record', async (req, res) => {
 });
 
 // ====================================================
-// 【管理者用】健康記録一覧を取得する（note対応版）
+// 【管理者用】健康記録一覧を取得する
 // ====================================================
 router.get('/admin/health-records', async (req, res) => {
-    const { year, month } = req.query;
+    const { year, month, store_id } = req.query;
+    const sId = store_id || 'all';
     try {
         const targetMonth = `${year}-${String(month).padStart(2, '0')}-01`;
         const query = `
@@ -1118,26 +1104,17 @@ router.get('/admin/health-records', async (req, res) => {
                    h.weight, h.height, h.bmi, h.note, h.updated_at
             FROM fukushi_users u
             LEFT JOIN fukushi_health_records h ON u.user_id = h.user_id AND h.target_month = $1
+            WHERE ($2::text = 'all' OR u.store_id = $2)
             ORDER BY u.user_id ASC
         `;
-        const result = await pool.query(query, [targetMonth]);
-        
-        // フロントエンドに返す際、日付を整形
+        const result = await pool.query(query, [targetMonth, sId]);
         const list = result.rows.map(r => ({
-            userId: r.user_id,
-            name: `${r.last_name} ${r.first_name}`,
-            weight: r.weight || '-',
-            height: r.height || '-',
-            bmi: r.bmi || '-',
-            note: r.note || '',
-            date: r.updated_at ? new Date(r.updated_at).toLocaleDateString('ja-JP') : '-'
+            userId: r.user_id, name: `${r.last_name} ${r.first_name}`,
+            weight: r.weight || '-', height: r.height || '-', bmi: r.bmi || '-',
+            note: r.note || '', date: r.updated_at ? new Date(r.updated_at).toLocaleDateString('ja-JP') : '-'
         }));
-        
         res.json({ success: true, list });
-    } catch (err) { 
-        console.error("記録取得エラー:", err);
-        res.status(500).json({ success: false }); 
-    }
+    } catch (err) { res.status(500).json({ success: false }); }
 });
 
 // 【管理者用】健康記録を修正保存する（note対応版）
@@ -1232,13 +1209,13 @@ router.get('/user/today', async (req, res) => {
 // ★ 追加：【管理者サイドバー用】当月の健康記録が未入力の人数を取得
 // ====================================================
 router.get('/admin/health/missing-count', async (req, res) => {
+    const { store_id } = req.query;
+    const sId = store_id || 'all';
     try {
-        // 日本時間を基準に「今月の1日」を算出
         const nowRes = await pool.query("SELECT CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo' as now");
         const now = new Date(nowRes.rows[0].now);
         const firstDayOfMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
 
-        // fukushi_users に存在する全利用者のうち、今月の target_month で health_records に存在しない人数をカウント
         const query = `
             SELECT COUNT(*) 
             FROM fukushi_users u
@@ -1246,12 +1223,11 @@ router.get('/admin/health/missing-count', async (req, res) => {
                 SELECT 1 
                 FROM fukushi_health_records h 
                 WHERE h.user_id = u.user_id AND h.target_month = $1
-            )
+            ) AND ($2::text = 'all' OR u.store_id = $2)
         `;
-        const result = await pool.query(query, [firstDayOfMonth]);
+        const result = await pool.query(query, [firstDayOfMonth, sId]);
         res.json({ success: true, count: parseInt(result.rows[0].count) });
     } catch (err) {
-        console.error("健康未入力カウントエラー:", err);
         res.status(500).json({ success: false, error: err.message });
     }
 });
@@ -1259,22 +1235,26 @@ router.get('/admin/health/missing-count', async (req, res) => {
 // ====================================================
 // ★ 追加：【管理者サイドバー用】当日ステータスが「予約」のままの人数を取得
 // ====================================================
-router.get('/api/admin/meal/pending-count', async (req, res) => {
+router.get('/admin/meal/pending-count', async (req, res) => {
+    const { store_id } = req.query;
+    const sId = store_id || 'all';
     try {
-        // 日本時間での当日（今日）の日付を取得
-        const nowRes = await pool.query("SELECT CURRENT_DATE AT TIME ZONE 'Asia/Tokyo' as today");
-        const today = nowRes.rows[0].today;
-
-        // 今日の日付で、ステータスが「予約」のレコードをカウント
         const query = `
             SELECT COUNT(*) 
-            FROM fukushi_meals 
-            WHERE meal_date = $1 AND status = '予約'
+            FROM fukushi_meals m
+            JOIN fukushi_users u ON m.user_id = u.user_id
+            WHERE m.status = '予約' 
+              AND (
+                m.meal_date < (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')::DATE 
+                OR 
+                (m.meal_date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')::DATE 
+                 AND (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')::TIME > '15:00:00')
+              )
+              AND ($1::text = 'all' OR u.store_id = $1)
         `;
-        const result = await pool.query(query, [today]);
+        const result = await pool.query(query, [sId]);
         res.json({ success: true, count: parseInt(result.rows[0].count) });
     } catch (err) {
-        console.error("食事未確定カウントエラー:", err);
         res.status(500).json({ success: false, error: err.message });
     }
 });
@@ -1313,21 +1293,20 @@ router.get('/setup-user-master-db', async (req, res) => {
 
 // 利用者マスタ取得
 router.get('/admin/user-master', async (req, res) => {
+    const { store_id } = req.query;
+    const sId = store_id || 'all';
     try {
         const result = await pool.query(`
             SELECT user_id, last_name, first_name, cert_number, special_meal_fee, height_cm, status, store_id 
-            FROM fukushi_users WHERE role = 'user' ORDER BY user_id ASC
-        `);
+            FROM fukushi_users 
+            WHERE role = 'user' AND ($1::text = 'all' OR store_id = $1)
+            ORDER BY user_id ASC
+        `, [sId]);
         const users = result.rows.map(r => ({
-            id: r.user_id,
-            name: `${r.last_name} ${r.first_name}`,
-            lastName: r.last_name,
-            firstName: r.first_name,
-            certNumber: r.cert_number,
-            specialMealFee: r.special_meal_fee,
-            heightCm: r.height_cm,
-            status: r.status || '利用中',
-            storeId: r.store_id || '店舗A' // ★追加
+            id: r.user_id, name: `${r.last_name} ${r.first_name}`,
+            lastName: r.last_name, firstName: r.first_name,
+            certNumber: r.cert_number, specialMealFee: r.special_meal_fee,
+            heightCm: r.height_cm, status: r.status || '利用中', storeId: r.store_id || '店舗A'
         }));
         res.json({ success: true, users });
     } catch (err) { res.status(500).json({ success: false }); }
