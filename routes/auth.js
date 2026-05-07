@@ -1266,80 +1266,107 @@ router.get('/api/admin/meal/pending-count', async (req, res) => {
 });
 
 // ====================================================
-// ★ 追加：利用者マスタのAPI群（カラム追加・取得・保存）
+// ★ 更新：利用者マスタのDB構成（契約日数削除・新カラム追加）
 // ====================================================
 router.get('/setup-user-master-db', async (req, res) => {
     try {
         await pool.query(`
             DO $$ 
             BEGIN 
+                -- 受給者証番号
                 IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fukushi_users' AND column_name='cert_number') THEN
                     ALTER TABLE fukushi_users ADD COLUMN cert_number VARCHAR(50);
                 END IF;
-                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fukushi_users' AND column_name='plan_days') THEN
-                    ALTER TABLE fukushi_users ADD COLUMN plan_days INTEGER DEFAULT 0;
+                -- 特別食事料金 (special_meal_fee)
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fukushi_users' AND column_name='special_meal_fee') THEN
+                    ALTER TABLE fukushi_users ADD COLUMN special_meal_fee INTEGER DEFAULT 0;
                 END IF;
+                -- 身長マスタ (height_cm)
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fukushi_users' AND column_name='height_cm') THEN
+                    ALTER TABLE fukushi_users ADD COLUMN height_cm DECIMAL(5,2);
+                END IF;
+                -- ステータス
                 IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fukushi_users' AND column_name='status') THEN
                     ALTER TABLE fukushi_users ADD COLUMN status VARCHAR(20) DEFAULT '利用中';
                 END IF;
             END $$;
         `);
-        res.json({ success: true, message: "利用者マスタ用のデータベース構成を更新しました。" });
+        res.json({ success: true, message: "データベース構成（特別料金・身長マスタ等）を更新しました。" });
     } catch (err) {
-        console.error("ユーザーDB更新エラー:", err);
         res.status(500).json({ success: false, error: err.message });
     }
 });
 
-// 利用者一覧の取得
+// 利用者マスタ取得
 router.get('/admin/user-master', async (req, res) => {
     try {
-        const result = await pool.query('SELECT user_id, last_name, first_name, cert_number, plan_days, status FROM fukushi_users WHERE role = $1 ORDER BY user_id ASC', ['user']);
+        const result = await pool.query(`
+            SELECT user_id, last_name, first_name, cert_number, special_meal_fee, height_cm, status 
+            FROM fukushi_users WHERE role = 'user' ORDER BY user_id ASC
+        `);
         const users = result.rows.map(r => ({
             id: r.user_id,
             name: `${r.last_name} ${r.first_name}`,
             lastName: r.last_name,
             firstName: r.first_name,
             certNumber: r.cert_number,
-            planDays: r.plan_days,
+            specialMealFee: r.special_meal_fee,
+            heightCm: r.height_cm,
             status: r.status || '利用中'
         }));
         res.json({ success: true, users });
-    } catch (err) {
-        res.status(500).json({ success: false, error: err.message });
-    }
+    } catch (err) { res.status(500).json({ success: false }); }
 });
 
-// 新規登録・更新の保存
+// 利用者マスタ保存
 router.post('/admin/user-master/save', async (req, res) => {
-    const { id, lastName, firstName, pinCode, certNumber, planDays, status, isNew } = req.body;
+    const { id, lastName, firstName, pinCode, certNumber, specialMealFee, heightCm, status, isNew } = req.body;
     try {
         if (isNew) {
             const hashedPin = await bcrypt.hash(pinCode || '1234', 10);
             await pool.query(`
-                INSERT INTO fukushi_users (user_id, last_name, first_name, pin_code, role, cert_number, plan_days, status)
-                VALUES ($1, $2, $3, $4, 'user', $5, $6, $7)
-            `, [id, lastName, firstName, hashedPin, certNumber, planDays || 0, status || '利用中']);
+                INSERT INTO fukushi_users (user_id, last_name, first_name, pin_code, role, cert_number, special_meal_fee, height_cm, status)
+                VALUES ($1, $2, $3, $4, 'user', $5, $6, $7, $8)
+            `, [id, lastName, firstName, hashedPin, certNumber, specialMealFee || 0, heightCm, status]);
         } else {
-            if (pinCode && pinCode.trim() !== '') {
-                const hashedPin = await bcrypt.hash(pinCode, 10);
-                await pool.query(`
-                    UPDATE fukushi_users 
-                    SET last_name=$2, first_name=$3, pin_code=$4, cert_number=$5, plan_days=$6, status=$7
-                    WHERE user_id=$1
-                `, [id, lastName, firstName, hashedPin, certNumber, planDays || 0, status]);
-            } else {
-                await pool.query(`
-                    UPDATE fukushi_users 
-                    SET last_name=$2, first_name=$3, cert_number=$4, plan_days=$5, status=$6
-                    WHERE user_id=$1
-                `, [id, lastName, firstName, certNumber, planDays || 0, status]);
-            }
+            const pinUpdate = pinCode && pinCode.trim() !== '';
+            const hashedPin = pinUpdate ? await bcrypt.hash(pinCode, 10) : null;
+            
+            await pool.query(`
+                UPDATE fukushi_users SET 
+                    last_name=$2, first_name=$3, cert_number=$4, special_meal_fee=$5, height_cm=$6, status=$7
+                    ${pinUpdate ? ', pin_code=$8' : ''}
+                WHERE user_id=$1
+            `, pinUpdate ? [id, lastName, firstName, certNumber, specialMealFee, heightCm, status, hashedPin] 
+                         : [id, lastName, firstName, certNumber, specialMealFee, heightCm, status]);
         }
         res.json({ success: true });
-    } catch (err) {
-        res.status(500).json({ success: false, error: err.message });
-    }
+    } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// 【利用者用】健康チェックAPI（初期値としてマスタの身長を返すように修正）
+router.get('/user/health-check', async (req, res) => {
+    const { user_id } = req.query;
+    try {
+        const nowRes = await pool.query("SELECT CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo' as now");
+        const now = nowRes.rows[0].now;
+        const firstDayOfMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+
+        const recordCheck = await pool.query(
+            `SELECT 1 FROM fukushi_health_records WHERE user_id = $1 AND target_month = $2`,
+            [user_id, firstDayOfMonth]
+        );
+        
+        // ★ マスタに登録されている「初期身長」を取得
+        const userRes = await pool.query(`SELECT height_cm FROM fukushi_users WHERE user_id = $1`, [user_id]);
+        const defaultHeight = userRes.rows[0]?.height_cm || '';
+
+        res.json({ 
+            success: true, 
+            needInput: recordCheck.rows.length === 0,
+            defaultHeight: defaultHeight // フロントエンドに初期値を渡す
+        });
+    } catch (err) { res.status(500).json({ success: false }); }
 });
 
 module.exports = router;
