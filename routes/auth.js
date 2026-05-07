@@ -190,6 +190,26 @@ router.get('/setup-invoice-db', async (req, res) => {
 });
 
 // ====================================================
+// ★ 納品管理テーブルの確実な作成API
+// ====================================================
+router.get('/setup-delivery-db', async (req, res) => {
+    try {
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS fukushi_meal_deliveries (
+                delivery_date DATE PRIMARY KEY,
+                delivered_count INTEGER DEFAULT 0,
+                updated_by VARCHAR(50),
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo'
+            );
+        `);
+        res.json({ success: true, message: "食事納品管理用のテーブル作成が正常に完了しました。" });
+    } catch (err) {
+        console.error("納品テーブル作成エラー:", err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// ====================================================
 // 2.4 インボイス設定（履歴管理対応）・請求備考テーブル
 // ====================================================
 pool.query(`
