@@ -1023,31 +1023,29 @@ router.post('/admin/meal-delivery/save', async (req, res) => {
     }
 });
 
-// 【利用者用】今月の入力が必要かチェックする
+// ====================================================
+// 【利用者用】今月の健康記録が必要かチェックする
+// ====================================================
 router.get('/user/health-check', async (req, res) => {
     const { user_id } = req.query;
     try {
-        const now = new Date();
+        // 日本時間の現在日時から「今月の1日」を算出
+        const nowRes = await pool.query("SELECT CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo' as now");
+        const now = nowRes.rows[0].now;
         const firstDayOfMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
-        const today = now.toISOString().split('T')[0];
 
-        // 1. 今月の通所予定日のうち、今日が「最初の通所日」かどうかを判定
-        const firstScheduleRes = await pool.query(
-            `SELECT MIN(plan_date) as first_day FROM fukushi_schedules WHERE user_id = $1 AND TO_CHAR(plan_date, 'YYYY-MM') = TO_CHAR(CURRENT_DATE, 'YYYY-MM')`,
-            [user_id]
-        );
-        const firstScheduledDate = firstScheduleRes.rows[0].first_day ? new Date(firstScheduleRes.rows[0].first_day).toISOString().split('T')[0] : null;
-
-        if (today !== firstScheduledDate) return res.json({ success: true, needInput: false });
-
-        // 2. すでに入力済みかチェック
+        // 今月の記録がすでにあるかチェック
+        // ※記録がなければ(0件なら) true を返し、入力されるまで何度でもフォームを出す
         const recordCheck = await pool.query(
             `SELECT 1 FROM fukushi_health_records WHERE user_id = $1 AND target_month = $2`,
             [user_id, firstDayOfMonth]
         );
 
         res.json({ success: true, needInput: recordCheck.rows.length === 0 });
-    } catch (err) { res.status(500).json({ success: false }); }
+    } catch (err) { 
+        console.error("健康チェックエラー:", err);
+        res.status(500).json({ success: false }); 
+    }
 });
 
 // 【利用者用】健康記録を保存する
