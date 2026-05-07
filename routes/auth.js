@@ -17,8 +17,22 @@ router.post('/admin/login', async (req, res) => {
         const isValidPassword = await bcrypt.compare(password, admin.password);
         if (!isValidPassword) return res.status(401).json({ success: false, message: 'メールアドレスまたはパスワードが違います' });
 
-        const token = jwt.sign({ id: admin.admin_id, role: 'admin' }, process.env.JWT_SECRET, { expiresIn: '24h' });
-        res.json({ success: true, token, admin: { id: admin.admin_id, name: `${admin.last_name} ${admin.first_name}` } });
+        // ★ tokenの中に role と store_id を含める
+        const token = jwt.sign(
+            { id: admin.admin_id, role: admin.admin_role || 'store_admin', store_id: admin.store_id }, 
+            process.env.JWT_SECRET, 
+            { expiresIn: '24h' }
+        );
+        res.json({ 
+            success: true, 
+            token, 
+            admin: { 
+                id: admin.admin_id, 
+                name: `${admin.last_name} ${admin.first_name}`,
+                role: admin.admin_role || 'store_admin', // ★フロントエンドに返す
+                storeId: admin.store_id                  // ★フロントエンドに返す
+            } 
+        });
     } catch (err) {
         console.error(err);
         res.status(500).json({ success: false, message: 'サーバーエラー' });
@@ -1443,12 +1457,21 @@ router.get('/setup-admin-master-db', async (req, res) => {
                 display_name VARCHAR(100),
                 email VARCHAR(100) UNIQUE,
                 status VARCHAR(20) DEFAULT '有効',
+                admin_role VARCHAR(20) DEFAULT 'store_admin', -- ★追加: super_admin (全権) または store_admin (店舗)
                 password VARCHAR(255) NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
+            
+            -- 既存テーブルが存在する場合の安全なカラム追加
+            DO $$ 
+            BEGIN 
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fukushi_admins' AND column_name='admin_role') THEN
+                    ALTER TABLE fukushi_admins ADD COLUMN admin_role VARCHAR(20) DEFAULT 'store_admin';
+                END IF;
+            END $$;
         `);
-        res.json({ success: true, message: "管理者マスタテーブルの構成を完了しました。" });
+        res.json({ success: true, message: "管理者マスタテーブルの構成を完了しました（権限カラム追加）。" });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
     }
@@ -1457,9 +1480,9 @@ router.get('/setup-admin-master-db', async (req, res) => {
 // 管理者一覧取得
 router.get('/admin/admin-master', async (req, res) => {
     try {
-        // 店舗名も一緒に取得
+        // ★ admin_role も一緒に取得
         const result = await pool.query(`
-            SELECT a.admin_id, a.store_id, a.last_name, a.first_name, a.display_name, a.email, a.status, s.store_name
+            SELECT a.admin_id, a.store_id, a.last_name, a.first_name, a.display_name, a.email, a.status, a.admin_role, s.store_name
             FROM fukushi_admins a
             LEFT JOIN fukushi_stores s ON a.store_id = s.store_id
             ORDER BY a.admin_id ASC
@@ -1472,28 +1495,29 @@ router.get('/admin/admin-master', async (req, res) => {
 
 // 管理者保存（新規・更新）
 router.post('/admin/admin-master/save', async (req, res) => {
-    const { admin_id, store_id, last_name, first_name, display_name, email, status, password, isNew } = req.body;
+    // ★ admin_role を受け取るように追加
+    const { admin_id, store_id, last_name, first_name, display_name, email, status, admin_role, password, isNew } = req.body;
     try {
         if (isNew) {
             const hashedPassword = await bcrypt.hash(password, 10);
             await pool.query(`
-                INSERT INTO fukushi_admins (admin_id, store_id, last_name, first_name, display_name, email, status, password)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-            `, [admin_id, store_id, last_name, first_name, display_name, email, status, hashedPassword]);
+                INSERT INTO fukushi_admins (admin_id, store_id, last_name, first_name, display_name, email, status, admin_role, password)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            `, [admin_id, store_id, last_name, first_name, display_name, email, status, admin_role || 'store_admin', hashedPassword]);
         } else {
             if (password && password.trim() !== '') {
                 const hashedPassword = await bcrypt.hash(password, 10);
                 await pool.query(`
                     UPDATE fukushi_admins 
-                    SET store_id=$2, last_name=$3, first_name=$4, display_name=$5, email=$6, status=$7, password=$8, updated_at=CURRENT_TIMESTAMP
+                    SET store_id=$2, last_name=$3, first_name=$4, display_name=$5, email=$6, status=$7, admin_role=$8, password=$9, updated_at=CURRENT_TIMESTAMP
                     WHERE admin_id=$1
-                `, [admin_id, store_id, last_name, first_name, display_name, email, status, hashedPassword]);
+                `, [admin_id, store_id, last_name, first_name, display_name, email, status, admin_role || 'store_admin', hashedPassword]);
             } else {
                 await pool.query(`
                     UPDATE fukushi_admins 
-                    SET store_id=$2, last_name=$3, first_name=$4, display_name=$5, email=$6, status=$7, updated_at=CURRENT_TIMESTAMP
+                    SET store_id=$2, last_name=$3, first_name=$4, display_name=$5, email=$6, status=$7, admin_role=$8, updated_at=CURRENT_TIMESTAMP
                     WHERE admin_id=$1
-                `, [admin_id, store_id, last_name, first_name, display_name, email, status]);
+                `, [admin_id, store_id, last_name, first_name, display_name, email, status, admin_role || 'store_admin']);
             }
         }
         res.json({ success: true });
