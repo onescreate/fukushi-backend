@@ -1078,35 +1078,59 @@ router.post('/user/health-record', async (req, res) => {
     }
 });
 
-// 【管理者用】健康記録一覧を取得する
+// ====================================================
+// 【管理者用】健康記録一覧を取得する（note対応版）
+// ====================================================
 router.get('/admin/health-records', async (req, res) => {
     const { year, month } = req.query;
     try {
         const targetMonth = `${year}-${String(month).padStart(2, '0')}-01`;
         const query = `
-            SELECT u.user_id, u.last_name, u.first_name, h.weight, h.height, h.bmi, h.updated_at
+            SELECT u.user_id, u.last_name, u.first_name, 
+                   h.weight, h.height, h.bmi, h.note, h.updated_at
             FROM fukushi_users u
             LEFT JOIN fukushi_health_records h ON u.user_id = h.user_id AND h.target_month = $1
             ORDER BY u.user_id ASC
         `;
         const result = await pool.query(query, [targetMonth]);
-        res.json({ success: true, list: result.rows });
-    } catch (err) { res.status(500).json({ success: false }); }
+        
+        // フロントエンドに返す際、日付を整形
+        const list = result.rows.map(r => ({
+            userId: r.user_id,
+            name: `${r.last_name} ${r.first_name}`,
+            weight: r.weight || '-',
+            height: r.height || '-',
+            bmi: r.bmi || '-',
+            note: r.note || '',
+            date: r.updated_at ? new Date(r.updated_at).toLocaleDateString('ja-JP') : '-'
+        }));
+        
+        res.json({ success: true, list });
+    } catch (err) { 
+        console.error("記録取得エラー:", err);
+        res.status(500).json({ success: false }); 
+    }
 });
 
-// 【管理者用】健康記録を修正保存する
+// 【管理者用】健康記録を修正保存する（note対応版）
 router.post('/admin/health-record/update', async (req, res) => {
-    const { user_id, year, month, weight, height } = req.body;
+    const { user_id, year, month, weight, height, note } = req.body;
     try {
         const targetMonth = `${year}-${String(month).padStart(2, '0')}-01`;
-        const bmi = (weight / ((height / 100) * (height / 100))).toFixed(2);
+        // サーバーサイドでもBMIを計算（安全策）
+        const bmi = (weight && height) ? (weight / ((height / 100) * (height / 100))).toFixed(2) : null;
+        
         await pool.query(`
-            INSERT INTO fukushi_health_records (user_id, target_month, weight, height, bmi)
-            VALUES ($1, $2, $3, $4, $5)
-            ON CONFLICT (user_id, target_month) DO UPDATE SET weight = $3, height = $4, bmi = $5, updated_at = CURRENT_TIMESTAMP
-        `, [user_id, targetMonth, weight, height, bmi]);
+            INSERT INTO fukushi_health_records (user_id, target_month, weight, height, bmi, note, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
+            ON CONFLICT (user_id, target_month) 
+            DO UPDATE SET weight = $3, height = $4, bmi = $5, note = $6, updated_at = CURRENT_TIMESTAMP
+        `, [user_id, targetMonth, weight, height, bmi, note]);
         res.json({ success: true });
-    } catch (err) { res.status(500).json({ success: false }); }
+    } catch (err) { 
+        console.error("記録更新エラー:", err);
+        res.status(500).json({ success: false }); 
+    }
 });
 
 // ====================================================
