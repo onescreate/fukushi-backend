@@ -883,24 +883,30 @@ pool.query(`
     );
 `).catch(err => console.error("納品テーブル作成エラー:", err));
 
-// 納品・発注データの月間取得API
+// ====================================================
+// ★ 修正版：食事納品管理（タイムゾーン・集計バグ修正版）
+// ====================================================
 router.get('/admin/meal-delivery/monthly', async (req, res) => {
     const { year, month } = req.query;
     try {
-        const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
-        const lastDay = new Date(year, month, 0).getDate();
-        const endDate = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+        const y = parseInt(year, 10);
+        const m = parseInt(month, 10);
+        const startDate = `${y}-${String(m).padStart(2, '0')}-01`;
+        const lastDay = new Date(y, m, 0).getDate();
+        const endDate = `${y}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
 
-        // 1. 発注数（statusが'取消'以外の全予約）を日付ごとに集計
+        // 1. 発注数：DB側で文字列(YYYY-MM-DD)に変換してから集計（ズレを防止）
+        // 予約・喫食済・キャンセル（厨房が準備すべき数）をカウント
         const orderQuery = `
-            SELECT meal_date, COUNT(*) as count 
+            SELECT TO_CHAR(meal_date, 'YYYY-MM-DD') as d_date, COUNT(*) as count 
             FROM fukushi_meals 
-            WHERE meal_date >= $1 AND meal_date <= $2 AND status != '取消'
+            WHERE meal_date >= $1 AND meal_date <= $2 
+              AND status IN ('予約', '喫食済', 'キャンセル') 
             GROUP BY meal_date
         `;
         const orderRes = await pool.query(orderQuery, [startDate, endDate]);
 
-        // 2. 登録済みの納品数を取得
+        // 2. 納品数：こちらも文字列で取得
         const deliveryQuery = `
             SELECT TO_CHAR(delivery_date, 'YYYY-MM-DD') as d_date, delivered_count 
             FROM fukushi_meal_deliveries 
@@ -908,19 +914,24 @@ router.get('/admin/meal-delivery/monthly', async (req, res) => {
         `;
         const deliveryRes = await pool.query(deliveryQuery, [startDate, endDate]);
 
-        // 3. データを整形（フロントエンドで使いやすいよう日付をキーにする）
+        // 3. マージ処理
         const summary = {};
+        // まず発注数をセット
         orderRes.rows.forEach(r => {
-            const d = new Date(r.meal_date).toLocaleDateString('sv-SE'); // YYYY-MM-DD
-            summary[d] = { orderCount: parseInt(r.count), deliveryCount: 0 };
+            summary[r.d_date] = { orderCount: parseInt(r.count), deliveryCount: 0 };
         });
+        // 次に納品数を上書き・追加
         deliveryRes.rows.forEach(r => {
-            if (!summary[r.d_date]) summary[r.d_date] = { orderCount: 0 };
-            summary[r.d_date].deliveryCount = r.delivered_count;
+            if (!summary[r.d_date]) {
+                summary[r.d_date] = { orderCount: 0, deliveryCount: parseInt(r.delivered_count) };
+            } else {
+                summary[r.d_date].deliveryCount = parseInt(r.delivered_count);
+            }
         });
 
         res.json({ success: true, summary });
     } catch (err) {
+        console.error("納品管理取得エラー:", err);
         res.status(500).json({ success: false, error: err.message });
     }
 });
