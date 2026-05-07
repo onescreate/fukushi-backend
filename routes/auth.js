@@ -871,4 +871,74 @@ router.get('/admin/billing-list', async (req, res) => {
     }
 });
 
+// ====================================================
+// ★ 食事納品管理用テーブルの自動生成
+// ====================================================
+pool.query(`
+    CREATE TABLE IF NOT EXISTS fukushi_meal_deliveries (
+        delivery_date DATE PRIMARY KEY,
+        delivered_count INTEGER DEFAULT 0,
+        updated_by VARCHAR(50),
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo'
+    );
+`).catch(err => console.error("納品テーブル作成エラー:", err));
+
+// 納品・発注データの月間取得API
+router.get('/admin/meal-delivery/monthly', async (req, res) => {
+    const { year, month } = req.query;
+    try {
+        const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
+        const lastDay = new Date(year, month, 0).getDate();
+        const endDate = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+
+        // 1. 発注数（statusが'取消'以外の全予約）を日付ごとに集計
+        const orderQuery = `
+            SELECT meal_date, COUNT(*) as count 
+            FROM fukushi_meals 
+            WHERE meal_date >= $1 AND meal_date <= $2 AND status != '取消'
+            GROUP BY meal_date
+        `;
+        const orderRes = await pool.query(orderQuery, [startDate, endDate]);
+
+        // 2. 登録済みの納品数を取得
+        const deliveryQuery = `
+            SELECT TO_CHAR(delivery_date, 'YYYY-MM-DD') as d_date, delivered_count 
+            FROM fukushi_meal_deliveries 
+            WHERE delivery_date >= $1 AND delivery_date <= $2
+        `;
+        const deliveryRes = await pool.query(deliveryQuery, [startDate, endDate]);
+
+        // 3. データを整形（フロントエンドで使いやすいよう日付をキーにする）
+        const summary = {};
+        orderRes.rows.forEach(r => {
+            const d = new Date(r.meal_date).toLocaleDateString('sv-SE'); // YYYY-MM-DD
+            summary[d] = { orderCount: parseInt(r.count), deliveryCount: 0 };
+        });
+        deliveryRes.rows.forEach(r => {
+            if (!summary[r.d_date]) summary[r.d_date] = { orderCount: 0 };
+            summary[r.d_date].deliveryCount = r.delivered_count;
+        });
+
+        res.json({ success: true, summary });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// 納品数の保存API
+router.post('/admin/meal-delivery/save', async (req, res) => {
+    const { date, deliveredCount, operator } = req.body;
+    try {
+        await pool.query(`
+            INSERT INTO fukushi_meal_deliveries (delivery_date, delivered_count, updated_by, updated_at)
+            VALUES ($1, $2, $3, CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')
+            ON CONFLICT (delivery_date) 
+            DO UPDATE SET delivered_count = EXCLUDED.delivered_count, updated_by = EXCLUDED.updated_by, updated_at = EXCLUDED.updated_at
+        `, [date, deliveredCount, operator || '管理者']);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 module.exports = router;
