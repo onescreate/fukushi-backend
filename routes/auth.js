@@ -812,7 +812,7 @@ router.get('/admin/meal/pending-count', async (req, res) => {
 });
 
 // ====================================================
-// ★ 修正版：食事料金請求リスト取得 API (ステータス基準で確実取得)
+// ★ 修正版：食事料金請求リスト取得 API (予約放置データのキャンセル料計算対応)
 // ====================================================
 router.get('/admin/billing-list', async (req, res) => {
     const { year, month } = req.query;
@@ -823,21 +823,34 @@ router.get('/admin/billing-list', async (req, res) => {
         const lastDay = new Date(y, m, 0).getDate();
         const endDate = `${y}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
 
-        // amountが0やNULLでも、「喫食済」「キャンセル」などの対象データなら確実に拾う
+        // ロジック：予約のまま(過去、または今日15時以降)ならキャンセル料を適用。それ以外は確定済みのamountを使用。
         const query = `
             SELECT 
                 u.user_id, 
                 u.last_name, 
                 u.first_name,
                 COUNT(m.meal_id) as meal_count,
-                SUM(COALESCE(m.amount, 0)) as total_amount,
-                n.note
+                SUM(
+                    CASE 
+                        WHEN m.status = '予約' AND (
+                            m.meal_date < (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')::DATE 
+                            OR 
+                            (m.meal_date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')::DATE 
+                             AND (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')::TIME > '15:00:00')
+                        ) THEN 
+                            (SELECT cancel_fee FROM fukushi_price_history ph 
+                             WHERE ph.effective_date <= m.meal_date 
+                             ORDER BY ph.effective_date DESC LIMIT 1)
+                        ELSE COALESCE(m.amount, 0) 
+                    END
+                ) as total_amount,
+                (SELECT note FROM fukushi_billing_notes n 
+                 WHERE n.user_id = u.user_id AND n.target_year = $3 AND n.target_month = $4 LIMIT 1) as note
             FROM fukushi_users u
             JOIN fukushi_meals m ON u.user_id = m.user_id
-            LEFT JOIN fukushi_billing_notes n ON u.user_id = n.user_id AND n.target_year = $3 AND n.target_month = $4
             WHERE m.meal_date >= $1 AND m.meal_date <= $2
               AND m.status IN ('予約', '喫食済', 'キャンセル') 
-            GROUP BY u.user_id, u.last_name, u.first_name, n.note
+            GROUP BY u.user_id, u.last_name, u.first_name
             ORDER BY u.user_id ASC
         `;
         
@@ -854,7 +867,7 @@ router.get('/admin/billing-list', async (req, res) => {
         res.json({ success: true, list });
     } catch (err) {
         console.error("請求リスト取得エラー:", err);
-        res.status(500).json({ success: false, error: err.message });
+        res.status(500).json({ success: false, error: "請求データの集計に失敗しました。" });
     }
 });
 
