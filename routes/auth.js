@@ -1129,4 +1129,28 @@ router.get('/setup-sample-users', async (req, res) => {
     }
 });
 
+// ====================================================
+// ★ 復旧：【利用者用】本日の予定とお弁当の有無を取得するAPI
+// ====================================================
+router.get('/user/today', async (req, res) => {
+    const { user_id, date } = req.query;
+    try {
+        const planRes = await pool.query('SELECT plan_in, plan_out FROM fukushi_schedules WHERE user_id = $1 AND plan_date = $2', [user_id, date]);
+        const mealRes = await pool.query('SELECT status FROM fukushi_meals WHERE user_id = $1 AND meal_date = $2', [user_id, date]);
+
+        let today = { planIn: '-', planOut: '-', mealStatus: 'なし' };
+        if (planRes.rows.length > 0) {
+            today.planIn = planRes.rows[0].plan_in ? planRes.rows[0].plan_in.substring(0, 5) : '-';
+            today.planOut = planRes.rows[0].plan_out ? planRes.rows[0].plan_out.substring(0, 5) : '-';
+        }
+        if (mealRes.rows.length > 0) {
+            today.mealStatus = mealRes.rows[0].status;
+        }
+        res.json({ success: true, today });
+    } catch (err) {
+        console.error("今日の予定取得エラー:", err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 module.exports = router;
