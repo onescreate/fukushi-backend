@@ -1266,32 +1266,32 @@ router.get('/api/admin/meal/pending-count', async (req, res) => {
 });
 
 // ====================================================
-// ★ 更新：利用者マスタのDB構成（契約日数削除・新カラム追加）
+// ★ 更新：利用者マスタのDB構成（店舗IDカラム追加版）
 // ====================================================
 router.get('/setup-user-master-db', async (req, res) => {
     try {
         await pool.query(`
             DO $$ 
             BEGIN 
-                -- 受給者証番号
                 IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fukushi_users' AND column_name='cert_number') THEN
                     ALTER TABLE fukushi_users ADD COLUMN cert_number VARCHAR(50);
                 END IF;
-                -- 特別食事料金 (special_meal_fee)
                 IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fukushi_users' AND column_name='special_meal_fee') THEN
                     ALTER TABLE fukushi_users ADD COLUMN special_meal_fee INTEGER DEFAULT 0;
                 END IF;
-                -- 身長マスタ (height_cm)
                 IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fukushi_users' AND column_name='height_cm') THEN
                     ALTER TABLE fukushi_users ADD COLUMN height_cm DECIMAL(5,2);
                 END IF;
-                -- ステータス
                 IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fukushi_users' AND column_name='status') THEN
                     ALTER TABLE fukushi_users ADD COLUMN status VARCHAR(20) DEFAULT '利用中';
                 END IF;
+                -- ★追加：所属店舗ID
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fukushi_users' AND column_name='store_id') THEN
+                    ALTER TABLE fukushi_users ADD COLUMN store_id VARCHAR(50) DEFAULT '店舗A';
+                END IF;
             END $$;
         `);
-        res.json({ success: true, message: "データベース構成（特別料金・身長マスタ等）を更新しました。" });
+        res.json({ success: true, message: "データベース構成（店舗ID等）を更新しました。" });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
     }
@@ -1301,7 +1301,7 @@ router.get('/setup-user-master-db', async (req, res) => {
 router.get('/admin/user-master', async (req, res) => {
     try {
         const result = await pool.query(`
-            SELECT user_id, last_name, first_name, cert_number, special_meal_fee, height_cm, status 
+            SELECT user_id, last_name, first_name, cert_number, special_meal_fee, height_cm, status, store_id 
             FROM fukushi_users WHERE role = 'user' ORDER BY user_id ASC
         `);
         const users = result.rows.map(r => ({
@@ -1312,7 +1312,8 @@ router.get('/admin/user-master', async (req, res) => {
             certNumber: r.cert_number,
             specialMealFee: r.special_meal_fee,
             heightCm: r.height_cm,
-            status: r.status || '利用中'
+            status: r.status || '利用中',
+            storeId: r.store_id || '店舗A' // ★追加
         }));
         res.json({ success: true, users });
     } catch (err) { res.status(500).json({ success: false }); }
@@ -1320,25 +1321,25 @@ router.get('/admin/user-master', async (req, res) => {
 
 // 利用者マスタ保存
 router.post('/admin/user-master/save', async (req, res) => {
-    const { id, lastName, firstName, pinCode, certNumber, specialMealFee, heightCm, status, isNew } = req.body;
+    const { id, lastName, firstName, pinCode, certNumber, specialMealFee, heightCm, status, storeId, isNew } = req.body;
     try {
         if (isNew) {
             const hashedPin = await bcrypt.hash(pinCode || '1234', 10);
             await pool.query(`
-                INSERT INTO fukushi_users (user_id, last_name, first_name, pin_code, role, cert_number, special_meal_fee, height_cm, status)
-                VALUES ($1, $2, $3, $4, 'user', $5, $6, $7, $8)
-            `, [id, lastName, firstName, hashedPin, certNumber, specialMealFee || 0, heightCm, status]);
+                INSERT INTO fukushi_users (user_id, last_name, first_name, pin_code, role, cert_number, special_meal_fee, height_cm, status, store_id)
+                VALUES ($1, $2, $3, $4, 'user', $5, $6, $7, $8, $9)
+            `, [id, lastName, firstName, hashedPin, certNumber, specialMealFee || 0, heightCm, status, storeId || '店舗A']);
         } else {
             const pinUpdate = pinCode && pinCode.trim() !== '';
             const hashedPin = pinUpdate ? await bcrypt.hash(pinCode, 10) : null;
             
             await pool.query(`
                 UPDATE fukushi_users SET 
-                    last_name=$2, first_name=$3, cert_number=$4, special_meal_fee=$5, height_cm=$6, status=$7
-                    ${pinUpdate ? ', pin_code=$8' : ''}
+                    last_name=$2, first_name=$3, cert_number=$4, special_meal_fee=$5, height_cm=$6, status=$7, store_id=$8
+                    ${pinUpdate ? ', pin_code=$9' : ''}
                 WHERE user_id=$1
-            `, pinUpdate ? [id, lastName, firstName, certNumber, specialMealFee, heightCm, status, hashedPin] 
-                         : [id, lastName, firstName, certNumber, specialMealFee, heightCm, status]);
+            `, pinUpdate ? [id, lastName, firstName, certNumber, specialMealFee, heightCm, status, storeId, hashedPin] 
+                         : [id, lastName, firstName, certNumber, specialMealFee, heightCm, status, storeId]);
         }
         res.json({ success: true });
     } catch (err) { res.status(500).json({ success: false, error: err.message }); }
