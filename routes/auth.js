@@ -1427,4 +1427,89 @@ router.post('/admin/stores/save', async (req, res) => {
     }
 });
 
+// ====================================================
+// ★ 管理者マスタ管理API（テーブル作成・取得・保存・削除）
+// ====================================================
+
+// テーブル作成・更新
+router.get('/setup-admin-master-db', async (req, res) => {
+    try {
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS fukushi_admins (
+                admin_id VARCHAR(50) PRIMARY KEY,
+                store_id VARCHAR(50),
+                last_name VARCHAR(50) NOT NULL,
+                first_name VARCHAR(50) NOT NULL,
+                display_name VARCHAR(100),
+                email VARCHAR(100) UNIQUE,
+                status VARCHAR(20) DEFAULT '有効',
+                password VARCHAR(255) NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        res.json({ success: true, message: "管理者マスタテーブルの構成を完了しました。" });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// 管理者一覧取得
+router.get('/admin/admin-master', async (req, res) => {
+    try {
+        // 店舗名も一緒に取得
+        const result = await pool.query(`
+            SELECT a.admin_id, a.store_id, a.last_name, a.first_name, a.display_name, a.email, a.status, s.store_name
+            FROM fukushi_admins a
+            LEFT JOIN fukushi_stores s ON a.store_id = s.store_id
+            ORDER BY a.admin_id ASC
+        `);
+        res.json({ success: true, admins: result.rows });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// 管理者保存（新規・更新）
+router.post('/admin/admin-master/save', async (req, res) => {
+    const { admin_id, store_id, last_name, first_name, display_name, email, status, password, isNew } = req.body;
+    try {
+        if (isNew) {
+            const hashedPassword = await bcrypt.hash(password, 10);
+            await pool.query(`
+                INSERT INTO fukushi_admins (admin_id, store_id, last_name, first_name, display_name, email, status, password)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            `, [admin_id, store_id, last_name, first_name, display_name, email, status, hashedPassword]);
+        } else {
+            if (password && password.trim() !== '') {
+                const hashedPassword = await bcrypt.hash(password, 10);
+                await pool.query(`
+                    UPDATE fukushi_admins 
+                    SET store_id=$2, last_name=$3, first_name=$4, display_name=$5, email=$6, status=$7, password=$8, updated_at=CURRENT_TIMESTAMP
+                    WHERE admin_id=$1
+                `, [admin_id, store_id, last_name, first_name, display_name, email, status, hashedPassword]);
+            } else {
+                await pool.query(`
+                    UPDATE fukushi_admins 
+                    SET store_id=$2, last_name=$3, first_name=$4, display_name=$5, email=$6, status=$7, updated_at=CURRENT_TIMESTAMP
+                    WHERE admin_id=$1
+                `, [admin_id, store_id, last_name, first_name, display_name, email, status]);
+            }
+        }
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// 管理者削除
+router.delete('/admin/admin-master/:id', async (req, res) => {
+    try {
+        await pool.query('DELETE FROM fukushi_admins WHERE admin_id = $1', [req.params.id]);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 module.exports = router;
