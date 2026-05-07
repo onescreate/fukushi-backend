@@ -229,6 +229,30 @@ router.get('/setup-delivery-db', async (req, res) => {
 });
 
 // ====================================================
+// ★ 健康管理（体重・BMI）テーブルの確実な作成API
+// ====================================================
+router.get('/setup-health-db', async (req, res) => {
+    try {
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS fukushi_health_records (
+                user_id VARCHAR(50) NOT NULL,
+                target_month DATE NOT NULL, -- その月の1日の日付を入れる
+                weight DECIMAL(5,2),
+                height DECIMAL(5,2),
+                bmi DECIMAL(4,2),
+                recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (user_id, target_month)
+            );
+        `);
+        res.json({ success: true, message: "健康管理テーブルの作成が完了しました。" });
+    } catch (err) {
+        console.error("テーブル作成エラー:", err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// ====================================================
 // 2.4 インボイス設定（履歴管理対応）・請求備考テーブル
 // ====================================================
 pool.query(`
@@ -997,6 +1021,81 @@ router.post('/admin/meal-delivery/save', async (req, res) => {
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
     }
+});
+
+// 【利用者用】今月の入力が必要かチェックする
+router.get('/user/health-check', async (req, res) => {
+    const { user_id } = req.query;
+    try {
+        const now = new Date();
+        const firstDayOfMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+        const today = now.toISOString().split('T')[0];
+
+        // 1. 今月の通所予定日のうち、今日が「最初の通所日」かどうかを判定
+        const firstScheduleRes = await pool.query(
+            `SELECT MIN(plan_date) as first_day FROM fukushi_schedules WHERE user_id = $1 AND TO_CHAR(plan_date, 'YYYY-MM') = TO_CHAR(CURRENT_DATE, 'YYYY-MM')`,
+            [user_id]
+        );
+        const firstScheduledDate = firstScheduleRes.rows[0].first_day ? new Date(firstScheduleRes.rows[0].first_day).toISOString().split('T')[0] : null;
+
+        if (today !== firstScheduledDate) return res.json({ success: true, needInput: false });
+
+        // 2. すでに入力済みかチェック
+        const recordCheck = await pool.query(
+            `SELECT 1 FROM fukushi_health_records WHERE user_id = $1 AND target_month = $2`,
+            [user_id, firstDayOfMonth]
+        );
+
+        res.json({ success: true, needInput: recordCheck.rows.length === 0 });
+    } catch (err) { res.status(500).json({ success: false }); }
+});
+
+// 【利用者用】健康記録を保存する
+router.post('/user/health-record', async (req, res) => {
+    const { user_id, weight, height } = req.body;
+    try {
+        const now = new Date();
+        const firstDayOfMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+        const bmi = (weight / ((height / 100) * (height / 100))).toFixed(2);
+
+        await pool.query(`
+            INSERT INTO fukushi_health_records (user_id, target_month, weight, height, bmi)
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (user_id, target_month) DO UPDATE SET weight = $3, height = $4, bmi = $5, updated_at = CURRENT_TIMESTAMP
+        `, [user_id, firstDayOfMonth, weight, height, bmi]);
+        res.json({ success: true });
+    } catch (err) { res.status(500).json({ success: false }); }
+});
+
+// 【管理者用】健康記録一覧を取得する
+router.get('/admin/health-records', async (req, res) => {
+    const { year, month } = req.query;
+    try {
+        const targetMonth = `${year}-${String(month).padStart(2, '0')}-01`;
+        const query = `
+            SELECT u.user_id, u.last_name, u.first_name, h.weight, h.height, h.bmi, h.updated_at
+            FROM fukushi_users u
+            LEFT JOIN fukushi_health_records h ON u.user_id = h.user_id AND h.target_month = $1
+            ORDER BY u.user_id ASC
+        `;
+        const result = await pool.query(query, [targetMonth]);
+        res.json({ success: true, list: result.rows });
+    } catch (err) { res.status(500).json({ success: false }); }
+});
+
+// 【管理者用】健康記録を修正保存する
+router.post('/admin/health-record/update', async (req, res) => {
+    const { user_id, year, month, weight, height } = req.body;
+    try {
+        const targetMonth = `${year}-${String(month).padStart(2, '0')}-01`;
+        const bmi = (weight / ((height / 100) * (height / 100))).toFixed(2);
+        await pool.query(`
+            INSERT INTO fukushi_health_records (user_id, target_month, weight, height, bmi)
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (user_id, target_month) DO UPDATE SET weight = $3, height = $4, bmi = $5, updated_at = CURRENT_TIMESTAMP
+        `, [user_id, targetMonth, weight, height, bmi]);
+        res.json({ success: true });
+    } catch (err) { res.status(500).json({ success: false }); }
 });
 
 module.exports = router;
