@@ -1057,24 +1057,38 @@ router.get('/user/health-check', async (req, res) => {
     }
 });
 
-// 【利用者用】健康記録を保存する
+// ====================================================
+// 【利用者用】健康記録を保存する（エラー詳細返却版）
+// ====================================================
 router.post('/user/health-record', async (req, res) => {
-    // ★ note を受け取るように追加
-    const { user_id, weight, height, note } = req.body; 
+    const { user_id, weight, height, note } = req.body;
     try {
-        const now = new Date();
+        // 日本時間を基準に「今月の1日」を安全に生成
+        const nowRes = await pool.query("SELECT CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo' as now");
+        const now = new Date(nowRes.rows[0].now);
         const firstDayOfMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
-        const bmi = (weight / ((height / 100) * (height / 100))).toFixed(2);
+
+        const w = parseFloat(weight);
+        const h = parseFloat(height);
+        let bmi = null;
+        
+        // 身長が正しく入力されている場合のみBMIを計算（ゼロ除算によるInfinityバグ防止）
+        if (w > 0 && h > 0) {
+            bmi = (w / ((h / 100) * (h / 100))).toFixed(2);
+        }
 
         await pool.query(`
-            INSERT INTO fukushi_health_records (user_id, target_month, weight, height, bmi, note)
-            VALUES ($1, $2, $3, $4, $5, $6)
-            ON CONFLICT (user_id, target_month) DO UPDATE SET weight = $3, height = $4, bmi = $5, note = $6, updated_at = CURRENT_TIMESTAMP
-        `, [user_id, firstDayOfMonth, weight, height, bmi, note]);
+            INSERT INTO fukushi_health_records (user_id, target_month, weight, height, bmi, note, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')
+            ON CONFLICT (user_id, target_month) 
+            DO UPDATE SET weight = $3, height = $4, bmi = $5, note = $6, updated_at = CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo'
+        `, [user_id, firstDayOfMonth, w, h, bmi, note]);
+        
         res.json({ success: true });
     } catch (err) { 
         console.error("健康記録保存エラー:", err);
-        res.status(500).json({ success: false }); 
+        // 推測せずに具体的なエラー内容をフロントエンドに返す
+        res.status(500).json({ success: false, error: err.message }); 
     }
 });
 
