@@ -1242,4 +1242,27 @@ router.get('/admin/health/missing-count', async (req, res) => {
     }
 });
 
+// ====================================================
+// ★ 追加：【管理者サイドバー用】当日ステータスが「予約」のままの人数を取得
+// ====================================================
+router.get('/api/admin/meal/pending-count', async (req, res) => {
+    try {
+        // 日本時間での当日（今日）の日付を取得
+        const nowRes = await pool.query("SELECT CURRENT_DATE AT TIME ZONE 'Asia/Tokyo' as today");
+        const today = nowRes.rows[0].today;
+
+        // 今日の日付で、ステータスが「予約」のレコードをカウント
+        const query = `
+            SELECT COUNT(*) 
+            FROM fukushi_meals 
+            WHERE meal_date = $1 AND status = '予約'
+        `;
+        const result = await pool.query(query, [today]);
+        res.json({ success: true, count: parseInt(result.rows[0].count) });
+    } catch (err) {
+        console.error("食事未確定カウントエラー:", err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 module.exports = router;
