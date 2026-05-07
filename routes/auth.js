@@ -190,7 +190,7 @@ router.get('/setup-invoice-db', async (req, res) => {
 });
 
 // ====================================================
-// ★ 納品管理テーブルの確実な作成API
+// ★ 納品管理テーブルの確実な作成・更新API（カラム追加版）
 // ====================================================
 router.get('/setup-delivery-db', async (req, res) => {
     try {
@@ -198,13 +198,32 @@ router.get('/setup-delivery-db', async (req, res) => {
             CREATE TABLE IF NOT EXISTS fukushi_meal_deliveries (
                 delivery_date DATE PRIMARY KEY,
                 delivered_count INTEGER DEFAULT 0,
-                updated_by VARCHAR(50),
+                note TEXT,
+                created_by VARCHAR(50),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
+            
+            -- 既存テーブルがある場合に備え、カラムが存在しない場合のみ追加する処理
+            DO $$ 
+            BEGIN 
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fukushi_meal_deliveries' AND column_name='note') THEN
+                    ALTER TABLE fukushi_meal_deliveries ADD COLUMN note TEXT;
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fukushi_meal_deliveries' AND column_name='created_by') THEN
+                    ALTER TABLE fukushi_meal_deliveries ADD COLUMN created_by VARCHAR(50);
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fukushi_meal_deliveries' AND column_name='created_at') THEN
+                    ALTER TABLE fukushi_meal_deliveries ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fukushi_meal_deliveries' AND column_name='updated_at') THEN
+                    ALTER TABLE fukushi_meal_deliveries ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+                END IF;
+            END $$;
         `);
-        res.json({ success: true, message: "食事納品管理用のテーブル作成が正常に完了しました。" });
+        res.json({ success: true, message: "食事納品管理用のテーブル構成（備考・登録者・日時等）を更新しました。" });
     } catch (err) {
-        console.error("納品テーブル作成エラー:", err);
+        console.error("納品テーブル更新エラー:", err);
         res.status(500).json({ success: false, error: err.message });
     }
 });
@@ -956,16 +975,24 @@ router.get('/admin/meal-delivery/monthly', async (req, res) => {
     }
 });
 
-// 納品数の保存API
 router.post('/admin/meal-delivery/save', async (req, res) => {
-    const { date, deliveredCount, operator } = req.body;
+    const { date, deliveredCount, orderedCount, note, operator } = req.body;
     try {
+        // 差異がある場合の備考必須チェック
+        if (parseInt(deliveredCount) !== parseInt(orderedCount) && (!note || note.trim() === '')) {
+            return res.status(400).json({ success: false, error: '発注数と納品数に差異があるため、備考を入力してください。' });
+        }
+
         await pool.query(`
-            INSERT INTO fukushi_meal_deliveries (delivery_date, delivered_count, updated_by, updated_at)
-            VALUES ($1, $2, $3, CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')
+            INSERT INTO fukushi_meal_deliveries (delivery_date, delivered_count, note, created_by, updated_at)
+            VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
             ON CONFLICT (delivery_date) 
-            DO UPDATE SET delivered_count = EXCLUDED.delivered_count, updated_by = EXCLUDED.updated_by, updated_at = EXCLUDED.updated_at
-        `, [date, deliveredCount, operator || '管理者']);
+            DO UPDATE SET 
+                delivered_count = EXCLUDED.delivered_count, 
+                note = EXCLUDED.note,
+                created_by = EXCLUDED.created_by,
+                updated_at = CURRENT_TIMESTAMP
+        `, [date, deliveredCount, note, operator || '管理者']);
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
