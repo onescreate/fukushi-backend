@@ -1214,4 +1214,32 @@ router.get('/user/today', async (req, res) => {
     }
 });
 
+// ====================================================
+// ★ 追加：【管理者サイドバー用】当月の健康記録が未入力の人数を取得
+// ====================================================
+router.get('/admin/health/missing-count', async (req, res) => {
+    try {
+        // 日本時間を基準に「今月の1日」を算出
+        const nowRes = await pool.query("SELECT CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo' as now");
+        const now = new Date(nowRes.rows[0].now);
+        const firstDayOfMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+
+        // fukushi_users に存在する全利用者のうち、今月の target_month で health_records に存在しない人数をカウント
+        const query = `
+            SELECT COUNT(*) 
+            FROM fukushi_users u
+            WHERE NOT EXISTS (
+                SELECT 1 
+                FROM fukushi_health_records h 
+                WHERE h.user_id = u.user_id AND h.target_month = $1
+            )
+        `;
+        const result = await pool.query(query, [firstDayOfMonth]);
+        res.json({ success: true, count: parseInt(result.rows[0].count) });
+    } catch (err) {
+        console.error("健康未入力カウントエラー:", err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 module.exports = router;
