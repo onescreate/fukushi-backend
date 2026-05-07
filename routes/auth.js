@@ -1370,4 +1370,61 @@ router.get('/user/health-check', async (req, res) => {
     } catch (err) { res.status(500).json({ success: false }); }
 });
 
+// ====================================================
+// ★ 店舗情報管理API（テーブル作成・取得・保存）
+// ====================================================
+
+// テーブル作成・更新
+router.get('/setup-store-db', async (req, res) => {
+    try {
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS fukushi_stores (
+                store_id VARCHAR(50) PRIMARY KEY,
+                store_name VARCHAR(100) NOT NULL,
+                email VARCHAR(100),
+                role VARCHAR(50),
+                status VARCHAR(20) DEFAULT '有効',
+                remarks TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        res.json({ success: true, message: "店舗情報テーブルの構成を完了しました。" });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// 店舗一覧取得
+router.get('/admin/stores', async (req, res) => {
+    try {
+        const result = await pool.query('SELECT * FROM fukushi_stores ORDER BY store_id ASC');
+        res.json({ success: true, stores: result.rows });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// 店舗情報保存（新規・更新）
+router.post('/admin/stores/save', async (req, res) => {
+    const { store_id, store_name, email, role, status, remarks, isNew } = req.body;
+    try {
+        if (isNew) {
+            await pool.query(`
+                INSERT INTO fukushi_stores (store_id, store_name, email, role, status, remarks)
+                VALUES ($1, $2, $3, $4, $5, $6)
+            `, [store_id, store_name, email, role, status, remarks]);
+        } else {
+            await pool.query(`
+                UPDATE fukushi_stores 
+                SET store_name=$2, email=$3, role=$4, status=$5, remarks=$6, updated_at=CURRENT_TIMESTAMP
+                WHERE store_id=$1
+            `, [store_id, store_name, email, role, status, remarks]);
+        }
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 module.exports = router;
