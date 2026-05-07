@@ -155,7 +155,7 @@ router.get('/setup-invoice-db', async (req, res) => {
                 bank_info TEXT,
                 effective_date DATE NOT NULL,
                 created_by VARCHAR(50),
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo'
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         `);
 
@@ -199,7 +199,7 @@ router.get('/setup-delivery-db', async (req, res) => {
                 delivery_date DATE PRIMARY KEY,
                 delivered_count INTEGER DEFAULT 0,
                 updated_by VARCHAR(50),
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo'
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         `);
         res.json({ success: true, message: "食事納品管理用のテーブル作成が正常に完了しました。" });
@@ -899,7 +899,7 @@ pool.query(`
         delivery_date DATE PRIMARY KEY,
         delivered_count INTEGER DEFAULT 0,
         updated_by VARCHAR(50),
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo'
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 `).catch(err => console.error("納品テーブル作成エラー:", err));
 
