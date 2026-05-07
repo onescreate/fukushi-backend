@@ -229,23 +229,32 @@ router.get('/setup-delivery-db', async (req, res) => {
 });
 
 // ====================================================
-// ★ 健康管理（体重・BMI）テーブルの確実な作成API
+// ★ 健康管理（体重・BMI）テーブルの確実な作成・更新API
 // ====================================================
 router.get('/setup-health-db', async (req, res) => {
     try {
         await pool.query(`
             CREATE TABLE IF NOT EXISTS fukushi_health_records (
                 user_id VARCHAR(50) NOT NULL,
-                target_month DATE NOT NULL, -- その月の1日の日付を入れる
+                target_month DATE NOT NULL,
                 weight DECIMAL(5,2),
                 height DECIMAL(5,2),
                 bmi DECIMAL(4,2),
+                note TEXT, -- ★特記事項を追加
                 recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (user_id, target_month)
             );
+
+            -- すでにテーブルが存在する場合はnoteカラムを追加する
+            DO $$ 
+            BEGIN 
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fukushi_health_records' AND column_name='note') THEN
+                    ALTER TABLE fukushi_health_records ADD COLUMN note TEXT;
+                END IF;
+            END $$;
         `);
-        res.json({ success: true, message: "健康管理テーブルの作成が完了しました。" });
+        res.json({ success: true, message: "健康管理テーブルの作成・更新が完了しました。" });
     } catch (err) {
         console.error("テーブル作成エラー:", err);
         res.status(500).json({ success: false, error: err.message });
@@ -1050,19 +1059,23 @@ router.get('/user/health-check', async (req, res) => {
 
 // 【利用者用】健康記録を保存する
 router.post('/user/health-record', async (req, res) => {
-    const { user_id, weight, height } = req.body;
+    // ★ note を受け取るように追加
+    const { user_id, weight, height, note } = req.body; 
     try {
         const now = new Date();
         const firstDayOfMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
         const bmi = (weight / ((height / 100) * (height / 100))).toFixed(2);
 
         await pool.query(`
-            INSERT INTO fukushi_health_records (user_id, target_month, weight, height, bmi)
-            VALUES ($1, $2, $3, $4, $5)
-            ON CONFLICT (user_id, target_month) DO UPDATE SET weight = $3, height = $4, bmi = $5, updated_at = CURRENT_TIMESTAMP
-        `, [user_id, firstDayOfMonth, weight, height, bmi]);
+            INSERT INTO fukushi_health_records (user_id, target_month, weight, height, bmi, note)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            ON CONFLICT (user_id, target_month) DO UPDATE SET weight = $3, height = $4, bmi = $5, note = $6, updated_at = CURRENT_TIMESTAMP
+        `, [user_id, firstDayOfMonth, weight, height, bmi, note]);
         res.json({ success: true });
-    } catch (err) { res.status(500).json({ success: false }); }
+    } catch (err) { 
+        console.error("健康記録保存エラー:", err);
+        res.status(500).json({ success: false }); 
+    }
 });
 
 // 【管理者用】健康記録一覧を取得する
