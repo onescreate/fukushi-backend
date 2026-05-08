@@ -1436,24 +1436,24 @@ router.get('/setup-admin-master-db', async (req, res) => {
                 display_name VARCHAR(100),
                 email VARCHAR(100) UNIQUE,
                 status VARCHAR(20) DEFAULT '有効',
-                admin_role VARCHAR(20) DEFAULT 'store_admin', -- ★追加: super_admin (全権) または store_admin (店舗)
+                admin_role VARCHAR(20) DEFAULT 'store_admin',
                 password VARCHAR(255) NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
-            
-            -- 既存テーブルが存在する場合の安全なカラム追加
             DO $$ 
             BEGIN 
                 IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fukushi_admins' AND column_name='admin_role') THEN
                     ALTER TABLE fukushi_admins ADD COLUMN admin_role VARCHAR(20) DEFAULT 'store_admin';
                 END IF;
+                /* ★ここを追加しました：updated_at カラムがない場合に追加する */
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fukushi_admins' AND column_name='updated_at') THEN
+                    ALTER TABLE fukushi_admins ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+                END IF;
             END $$;
         `);
-        res.json({ success: true, message: "管理者マスタテーブルの構成を完了しました（権限カラム追加）。" });
-    } catch (err) {
-        res.status(500).json({ success: false, error: err.message });
-    }
+        res.json({ success: true, message: "管理者マスタテーブルの構成を完了しました。" });
+    } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
 
 // 管理者一覧取得
