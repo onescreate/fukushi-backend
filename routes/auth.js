@@ -1516,4 +1516,20 @@ router.delete('/admin/admin-master/:id', async (req, res) => {
     }
 });
 
+// 店舗の削除API
+router.delete('/admin/stores/:id', async (req, res) => {
+    const { id } = req.params;
+    try {
+        // ※テーブル名が 'stores' または 'fukushi_stores' など、実際の環境に合わせてください
+        await pool.query('DELETE FROM stores WHERE store_id = $1', [id]);
+        res.json({ success: true });
+    } catch (err) {
+        // 外部キー制約（この店舗に紐づくユーザーがいる等）で消せない場合のエラーハンドリング
+        if (err.code === '23503') {
+            return res.status(400).json({ success: false, error: "この店舗に紐づいている管理者や利用者がいるため削除できません。" });
+        }
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 module.exports = router;
