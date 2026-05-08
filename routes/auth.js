@@ -1032,6 +1032,27 @@ router.post('/admin/meal-delivery/save', async (req, res) => {
 });
 
 // ====================================================
+// ★ 追加：本日の納品登録状況（未処理バッジ用）
+// ====================================================
+router.get('/admin/delivery/today-status', async (req, res) => {
+    const { store_id } = req.query;
+    try {
+        const query = store_id === 'all' 
+            ? `SELECT COUNT(*) FROM fukushi_meal_deliveries WHERE delivery_date = CURRENT_DATE`
+            : `SELECT COUNT(*) FROM fukushi_meal_deliveries WHERE delivery_date = CURRENT_DATE AND store_id = $1`;
+        
+        const params = store_id === 'all' ? [] : [store_id];
+        const result = await pool.query(query, params);
+        
+        const isRegistered = parseInt(result.rows[0].count) > 0;
+        res.json({ success: true, isRegistered });
+    } catch (err) {
+        console.error("本日の納品状況取得エラー:", err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// ====================================================
 // 【利用者用】今月の健康記録が必要かチェックする
 // ====================================================
 router.get('/user/health-check', async (req, res) => {
