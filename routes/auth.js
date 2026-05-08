@@ -173,15 +173,24 @@ router.get('/setup-invoice-db', async (req, res) => {
             );
         `);
 
-        // ② 請求備考テーブルの作成
+        // ② 請求備考・支払管理テーブルの作成 (修正)
         await pool.query(`
             CREATE TABLE IF NOT EXISTS fukushi_billing_notes (
                 user_id VARCHAR(50) NOT NULL,
                 target_year INTEGER NOT NULL,
                 target_month INTEGER NOT NULL,
                 note TEXT,
+                payment_date DATE, -- ★追加：支払日
                 PRIMARY KEY (user_id, target_year, target_month)
             );
+            
+            -- すでにテーブルがある場合はカラムを追加
+            DO $$ 
+            BEGIN 
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fukushi_billing_notes' AND column_name='payment_date') THEN
+                    ALTER TABLE fukushi_billing_notes ADD COLUMN payment_date DATE;
+                END IF;
+            END $$;
         `);
 
         // ③ インボイス設定の初期データ投入（空の場合のみ）
@@ -895,20 +904,22 @@ router.get('/admin/billing-list', async (req, res) => {
                         ELSE COALESCE(m.amount, 0) 
                     END
                 ) as total_amount,
-                (SELECT note FROM fukushi_billing_notes n WHERE n.user_id = u.user_id AND n.target_year = $3 AND n.target_month = $4 LIMIT 1) as note
+                n.note, n.payment_date -- ★修正：JOINで取得するように変更
             FROM fukushi_users u
             JOIN fukushi_meals m ON u.user_id = m.user_id
+            LEFT JOIN fukushi_billing_notes n ON u.user_id = n.user_id AND n.target_year = $3 AND n.target_month = $4
             WHERE m.meal_date >= $1 AND m.meal_date <= $2
               AND m.status IN ('予約', '喫食済', 'キャンセル') 
               AND ($5::text = 'all' OR u.store_id = $5)
-            GROUP BY u.user_id, u.last_name, u.first_name
+            GROUP BY u.user_id, u.last_name, u.first_name, n.note, n.payment_date
             ORDER BY u.user_id ASC
         `;
         const result = await pool.query(query, [startDate, endDate, y, m, sId]);
         const list = result.rows.map(r => ({
             userId: r.user_id, name: `${r.last_name} ${r.first_name}`,
             mealCount: parseInt(r.meal_count), totalAmount: parseInt(r.total_amount),
-            note: r.note || '', status: '未請求' 
+            note: r.note || '', paymentDate: r.payment_date ? new Date(r.payment_date).toLocaleDateString('ja-JP') : null, // ★支払日を追加
+            status: r.payment_date ? '支払済' : '未請求' // ★フロントで使いやすいようにステータス付与
         }));
         res.json({ success: true, list });
     } catch (err) { res.status(500).json({ success: false, error: err.message }); }
@@ -1050,6 +1061,53 @@ router.get('/admin/delivery/today-status', async (req, res) => {
         console.error("本日の納品状況取得エラー:", err);
         res.status(500).json({ success: false, error: err.message });
     }
+});
+
+// 前月の未払い件数を取得するAPI（サイドバー用）
+router.get('/admin/billing/unpaid-count', async (req, res) => {
+    const { store_id } = req.query;
+    const sId = store_id || 'all';
+    try {
+        const now = new Date();
+        // 前月を計算
+        now.setMonth(now.getMonth() - 1);
+        const y = now.getFullYear();
+        const m = now.getMonth() + 1;
+        
+        const startDate = `${y}-${String(m).padStart(2, '0')}-01`;
+        const lastDay = new Date(y, m, 0).getDate();
+        const endDate = `${y}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+
+        const query = `
+            SELECT COUNT(DISTINCT u.user_id) as count
+            FROM fukushi_users u
+            JOIN fukushi_meals m ON u.user_id = m.user_id
+            LEFT JOIN fukushi_billing_notes n ON u.user_id = n.user_id AND n.target_year = $3 AND n.target_month = $4
+            WHERE m.meal_date >= $1 AND m.meal_date <= $2
+              AND m.status IN ('予約', '喫食済', 'キャンセル') 
+              AND n.payment_date IS NULL
+              AND ($5::text = 'all' OR u.store_id = $5)
+        `;
+        const result = await pool.query(query, [startDate, endDate, y, m, sId]);
+        res.json({ success: true, count: parseInt(result.rows[0].count) });
+    } catch (err) {
+        console.error("未払いカウントエラー:", err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// 支払い日を記録/解除するAPI
+router.post('/admin/billing/payment', async (req, res) => {
+    const { user_id, year, month, payment_date } = req.body;
+    try {
+        await pool.query(`
+            INSERT INTO fukushi_billing_notes (user_id, target_year, target_month, payment_date) 
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (user_id, target_year, target_month) 
+            DO UPDATE SET payment_date = EXCLUDED.payment_date
+        `, [user_id, year, month, payment_date || null]);
+        res.json({ success: true });
+    } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
 
 // ====================================================
