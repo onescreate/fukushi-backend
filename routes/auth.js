@@ -1487,14 +1487,12 @@ router.post('/admin/admin-master/save', async (req, res) => {
         } else {
             if (password && password.trim() !== '') {
                 const hashedPassword = await bcrypt.hash(password, 10);
-                // ★修正：updated_at=CURRENT_TIMESTAMP を削除しました
                 await pool.query(`
                     UPDATE fukushi_admins 
                     SET store_id=$2, last_name=$3, first_name=$4, display_name=$5, email=$6, status=$7, admin_role=$8, password=$9
                     WHERE admin_id=$1
                 `, [admin_id, store_id, last_name, first_name, display_name, email, status, admin_role || 'store_admin', hashedPassword]);
             } else {
-                // ★修正：updated_at=CURRENT_TIMESTAMP を削除しました
                 await pool.query(`
                     UPDATE fukushi_admins 
                     SET store_id=$2, last_name=$3, first_name=$4, display_name=$5, email=$6, status=$7, admin_role=$8
