@@ -1370,16 +1370,22 @@ router.get('/admin/user-master', async (req, res) => {
     } catch (err) { res.status(500).json({ success: false }); }
 });
 
-// 利用者マスタ保存
+// 利用者マスタ保存 (修正版)
 router.post('/admin/user-master/save', async (req, res) => {
     const { id, lastName, firstName, pinCode, certNumber, specialMealFee, heightCm, status, storeId, isNew } = req.body;
+    
+    // ★追加：空文字を適切に数値またはNULLに変換（型エラー防止）
+    // 食事代は空なら 0、身長は空なら NULL として扱う
+    const sMealFee = (specialMealFee === "" || specialMealFee === null) ? 0 : specialMealFee;
+    const hCm = (heightCm === "" || heightCm === null) ? null : heightCm;
+
     try {
         if (isNew) {
             const hashedPin = await bcrypt.hash(pinCode || '1234', 10);
             await pool.query(`
                 INSERT INTO fukushi_users (user_id, last_name, first_name, pin_code, role, cert_number, special_meal_fee, height_cm, status, store_id)
                 VALUES ($1, $2, $3, $4, 'user', $5, $6, $7, $8, $9)
-            `, [id, lastName, firstName, hashedPin, certNumber, specialMealFee || 0, heightCm, status, storeId || '店舗A']);
+            `, [id, lastName, firstName, hashedPin, certNumber, sMealFee, hCm, status, storeId || '店舗A']);
         } else {
             const pinUpdate = pinCode && pinCode.trim() !== '';
             const hashedPin = pinUpdate ? await bcrypt.hash(pinCode, 10) : null;
@@ -1389,11 +1395,35 @@ router.post('/admin/user-master/save', async (req, res) => {
                     last_name=$2, first_name=$3, cert_number=$4, special_meal_fee=$5, height_cm=$6, status=$7, store_id=$8
                     ${pinUpdate ? ', pin_code=$9' : ''}
                 WHERE user_id=$1
-            `, pinUpdate ? [id, lastName, firstName, certNumber, specialMealFee, heightCm, status, storeId, hashedPin] 
-                         : [id, lastName, firstName, certNumber, specialMealFee, heightCm, status, storeId]);
+            `, pinUpdate ? [id, lastName, firstName, certNumber, sMealFee, hCm, status, storeId, hashedPin] 
+                         : [id, lastName, firstName, certNumber, sMealFee, hCm, status, storeId]);
         }
         res.json({ success: true });
-    } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+    } catch (err) { 
+        console.error("利用者マスタ保存エラー:", err);
+        res.status(500).json({ success: false, error: err.message }); 
+    }
+});
+// ==========================================
+// ★ 追加：利用者マスタの削除API
+// ==========================================
+router.delete('/admin/user-master/:id', async (req, res) => {
+    try {
+        const userId = req.params.id;
+        
+        // 外部キー制約（実績などのデータが残っている）で削除できない場合を防ぐため、
+        // 関連データごと消すか、物理削除を行う（今回は利用者マスタからの削除）
+        await pool.query('DELETE FROM fukushi_users WHERE user_id = $1', [userId]);
+        
+        res.json({ success: true });
+    } catch (err) {
+        console.error("利用者削除エラー:", err);
+        // 外部キー制約（foreign key constraint）エラーのキャッチ
+        if (err.code === '23503') {
+            return res.status(400).json({ success: false, error: "この利用者はすでに打刻や実績データが存在するため、物理削除できません。「ステータス」を「退所」に変更して対応してください。" });
+        }
+        res.status(500).json({ success: false, error: err.message });
+    }
 });
 
 // 【利用者用】健康チェックAPI（初期値としてマスタの身長を返すように修正）
