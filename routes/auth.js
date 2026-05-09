@@ -1594,39 +1594,20 @@ router.delete('/admin/stores/:id', async (req, res) => {
 // ★ 新規機能：締め業務（日次加算実績）API
 // ====================================================
 
-// 1. テーブル構築API
-router.get('/setup-additions-db', async (req, res) => {
-    try {
-        await pool.query(`
-            CREATE TABLE IF NOT EXISTS fukushi_daily_additions (
-                user_id VARCHAR(50) NOT NULL,
-                target_date DATE NOT NULL,
-                regional_meeting BOOLEAN DEFAULT FALSE,
-                transition_support BOOLEAN DEFAULT FALSE,
-                absence_response BOOLEAN DEFAULT FALSE,
-                updated_by VARCHAR(50),
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY (user_id, target_date)
-            );
-        `);
-        res.json({ success: true, message: "締め業務用の加算テーブルを作成しました。" });
-    } catch (err) {
-        res.status(500).json({ success: false, error: err.message });
-    }
-});
-
-// 2. 締め業務リストの取得API
+// 1. 締め業務リストの取得API
 router.get('/admin/closing-operations', async (req, res) => {
     const { date, store_id } = req.query;
     const sId = store_id || 'all';
     try {
-        // 利用者マスタ、予定・打刻、食事、加算テーブルを結合して取得
+        // 既存の fukushi_daily_additions テーブルの正確なカラム名を使用
         const query = `
             SELECT 
-                u.user_id, u.last_name, u.first_name,
+                u.user_id, u.last_name, u.first_name, u.store_id,
                 s.plan_in, s.plan_out, s.act_in, s.act_out,
                 m.status as meal_status,
-                da.regional_meeting, da.transition_support, da.absence_response
+                da.regional_cooperation_addition, 
+                da.transition_prep_addition, 
+                da.absence_handling_addition
             FROM fukushi_users u
             LEFT JOIN fukushi_schedules s ON u.user_id = s.user_id AND s.plan_date = $1
             LEFT JOIN fukushi_meals m ON u.user_id = m.user_id AND m.meal_date = $1
@@ -1636,7 +1617,7 @@ router.get('/admin/closing-operations', async (req, res) => {
         `;
         const result = await pool.query(query, [date, sId]);
 
-        // 「予定（plan）がある」または「打刻（act）がある」人だけを抽出
+        // 「予定がある」または「打刻がある」人だけを抽出
         const filteredList = result.rows.filter(r => r.plan_in || r.plan_out || r.act_in || r.act_out);
 
         res.json({ success: true, list: filteredList });
@@ -1646,26 +1627,40 @@ router.get('/admin/closing-operations', async (req, res) => {
     }
 });
 
-// 3. 加算項目のON/OFF保存API
+// 2. 加算項目のON/OFF保存API（既存テーブル対応・安全版）
 router.post('/admin/closing-operations/save', async (req, res) => {
-    const { user_id, date, field, value, operator } = req.body;
+    const { user_id, date, field, value, store_id } = req.body;
     
-    // SQLインジェクション防止のためのカラム名ホワイトリスト
-    const allowedFields = ['regional_meeting', 'transition_support', 'absence_response'];
+    // SQLインジェクション防止：既存テーブルの正確なカラム名のみ許可
+    const allowedFields = ['regional_cooperation_addition', 'transition_prep_addition', 'absence_handling_addition'];
     if (!allowedFields.includes(field)) return res.status(400).json({ success: false, error: "無効な項目です" });
 
     try {
-        await pool.query(`
-            INSERT INTO fukushi_daily_additions (user_id, target_date, ${field}, updated_by, updated_at)
-            VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')
-            ON CONFLICT (user_id, target_date)
-            DO UPDATE SET 
-                ${field} = EXCLUDED.${field}, 
-                updated_by = EXCLUDED.updated_by, 
-                updated_at = CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo'
-        `, [user_id, date, value, operator || '管理者']);
+        await pool.query('BEGIN');
+
+        // まず、該当のユーザー・日付のデータが既に存在するか確認する
+        const existCheck = await pool.query('SELECT addition_id FROM fukushi_daily_additions WHERE user_id = $1 AND target_date = $2', [user_id, date]);
+
+        if (existCheck.rows.length > 0) {
+            // データがあれば、対象のカラムだけをUPDATE（updated_byは既存テーブルに無いので外しています）
+            await pool.query(`
+                UPDATE fukushi_daily_additions 
+                SET ${field} = $1, updated_at = CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo'
+                WHERE user_id = $2 AND target_date = $3
+            `, [value, user_id, date]);
+        } else {
+            // データがなければ、新規作成（INSERT）
+            const newId = 'DA' + Date.now() + Math.floor(Math.random() * 1000);
+            await pool.query(`
+                INSERT INTO fukushi_daily_additions (addition_id, store_id, user_id, target_date, ${field}, updated_at)
+                VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')
+            `, [newId, store_id, user_id, date, value]);
+        }
+
+        await pool.query('COMMIT');
         res.json({ success: true });
     } catch (err) {
+        await pool.query('ROLLBACK');
         console.error("加算保存エラー:", err);
         res.status(500).json({ success: false, error: err.message });
     }
