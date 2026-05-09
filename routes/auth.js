@@ -1590,4 +1590,85 @@ router.delete('/admin/stores/:id', async (req, res) => {
     }
 });
 
+// ====================================================
+// ★ 新規機能：締め業務（日次加算実績）API
+// ====================================================
+
+// 1. テーブル構築API
+router.get('/setup-additions-db', async (req, res) => {
+    try {
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS fukushi_daily_additions (
+                user_id VARCHAR(50) NOT NULL,
+                target_date DATE NOT NULL,
+                regional_meeting BOOLEAN DEFAULT FALSE,
+                transition_support BOOLEAN DEFAULT FALSE,
+                absence_response BOOLEAN DEFAULT FALSE,
+                updated_by VARCHAR(50),
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (user_id, target_date)
+            );
+        `);
+        res.json({ success: true, message: "締め業務用の加算テーブルを作成しました。" });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// 2. 締め業務リストの取得API
+router.get('/admin/closing-operations', async (req, res) => {
+    const { date, store_id } = req.query;
+    const sId = store_id || 'all';
+    try {
+        // 利用者マスタ、予定・打刻、食事、加算テーブルを結合して取得
+        const query = `
+            SELECT 
+                u.user_id, u.last_name, u.first_name,
+                s.plan_in, s.plan_out, s.act_in, s.act_out,
+                m.status as meal_status,
+                da.regional_meeting, da.transition_support, da.absence_response
+            FROM fukushi_users u
+            LEFT JOIN fukushi_schedules s ON u.user_id = s.user_id AND s.plan_date = $1
+            LEFT JOIN fukushi_meals m ON u.user_id = m.user_id AND m.meal_date = $1
+            LEFT JOIN fukushi_daily_additions da ON u.user_id = da.user_id AND da.target_date = $1
+            WHERE u.role = 'user' AND ($2::text = 'all' OR u.store_id = $2)
+            ORDER BY u.user_id ASC
+        `;
+        const result = await pool.query(query, [date, sId]);
+
+        // 「予定（plan）がある」または「打刻（act）がある」人だけを抽出
+        const filteredList = result.rows.filter(r => r.plan_in || r.plan_out || r.act_in || r.act_out);
+
+        res.json({ success: true, list: filteredList });
+    } catch (err) {
+        console.error("締め業務リスト取得エラー:", err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// 3. 加算項目のON/OFF保存API
+router.post('/admin/closing-operations/save', async (req, res) => {
+    const { user_id, date, field, value, operator } = req.body;
+    
+    // SQLインジェクション防止のためのカラム名ホワイトリスト
+    const allowedFields = ['regional_meeting', 'transition_support', 'absence_response'];
+    if (!allowedFields.includes(field)) return res.status(400).json({ success: false, error: "無効な項目です" });
+
+    try {
+        await pool.query(`
+            INSERT INTO fukushi_daily_additions (user_id, target_date, ${field}, updated_by, updated_at)
+            VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')
+            ON CONFLICT (user_id, target_date)
+            DO UPDATE SET 
+                ${field} = EXCLUDED.${field}, 
+                updated_by = EXCLUDED.updated_by, 
+                updated_at = CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo'
+        `, [user_id, date, value, operator || '管理者']);
+        res.json({ success: true });
+    } catch (err) {
+        console.error("加算保存エラー:", err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 module.exports = router;
