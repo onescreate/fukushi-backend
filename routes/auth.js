@@ -354,7 +354,8 @@ router.post('/admin/settings/price', async (req, res) => {
 // 3. 利用者からの入力 API (日本時間・監査ログ対応)
 // ====================================================
 router.post('/user/stamp', async (req, res) => {
-    const { user_id, stamp_type } = req.body;
+    // ★修正: reason と status_type を受け取る
+    const { user_id, stamp_type, reason, status_type } = req.body;
     try {
         await pool.query('BEGIN');
         const nowRes = await pool.query("SELECT CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo' as now_ts, TO_CHAR(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo', 'YYYY-MM-DD') as d_str, TO_CHAR(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo', 'HH24:MI') as t_str");
@@ -378,6 +379,12 @@ router.post('/user/stamp', async (req, res) => {
                 `INSERT INTO fukushi_schedules (plan_id, user_id, plan_date, ${col}, status, created_by, updated_by, created_at, updated_at) VALUES ($1, $2, $3, $4, '承認済', '自動生成', '本人打刻', $5, $5)`,
                 [planId, user_id, d_str, t_str, now_ts]
             );
+        }
+
+        // ★追加: 遅刻・早退の理由があれば note（備考）に追記する
+        if (reason && status_type) {
+            const noteText = `\n【${status_type}】${reason}`;
+            await pool.query(`UPDATE fukushi_schedules SET note = CONCAT(COALESCE(note, ''), $1::text) WHERE user_id = $2 AND plan_date = $3`, [noteText, user_id, d_str]);
         }
 
         await pool.query('COMMIT');
@@ -1724,6 +1731,52 @@ router.post('/admin/attendance/create-new', async (req, res) => {
         res.json({ success: true });
     } catch (err) {
         console.error("新規打刻登録エラー:", err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// ====================================================
+// ★ 新規追加：過去1ヶ月の「未記入の欠席」を取得
+// ====================================================
+router.get('/user/past-absences', async (req, res) => {
+    const { user_id } = req.query;
+    try {
+        // 日本時間の今日を基準に、過去1ヶ月間の中で、
+        // act_inもact_outもなく、かつ備考に「【欠席】」の記載がない日を取得
+        const query = `
+            SELECT TO_CHAR(plan_date, 'YYYY-MM-DD') as date, plan_in, plan_out
+            FROM fukushi_schedules
+            WHERE user_id = $1
+              AND plan_date >= ((CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')::DATE - INTERVAL '1 month')
+              AND plan_date < (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')::DATE
+              AND (act_in IS NULL AND act_out IS NULL)
+              AND (note IS NULL OR note NOT LIKE '%【欠席】%')
+            ORDER BY plan_date ASC
+        `;
+        const result = await pool.query(query, [user_id]);
+        res.json({ success: true, list: result.rows });
+    } catch (err) {
+        console.error("過去の欠席取得エラー:", err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// ====================================================
+// ★ 新規追加：過去の欠席理由を保存する
+// ====================================================
+router.post('/user/past-absences/reason', async (req, res) => {
+    const { user_id, date, reason } = req.body;
+    try {
+        const noteText = `【欠席】${reason}`;
+        await pool.query(`
+            UPDATE fukushi_schedules 
+            SET note = CASE WHEN note IS NULL OR note = '' THEN $1 ELSE note || '\n' || $1 END,
+                updated_at = CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo'
+            WHERE user_id = $2 AND plan_date = $3
+        `, [noteText, user_id, date]);
+        res.json({ success: true });
+    } catch (err) {
+        console.error("欠席理由保存エラー:", err);
         res.status(500).json({ success: false, error: err.message });
     }
 });
