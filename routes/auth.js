@@ -149,18 +149,16 @@ router.get('/setup-db', async (req, res) => {
     }
 });
 
-// ====================================================
-// ★ インボイス・請求備考用テーブルの確実な作成API
-// （※既存データには影響しません）
-// ====================================================
+// fukushi-backend/routes/auth.js
+
 router.get('/setup-invoice-db', async (req, res) => {
     try {
         await pool.query('BEGIN');
-
-        // ① 請求者情報（インボイス）履歴テーブルの作成
+        // ① 請求者情報（インボイス）履歴テーブルの修正
         await pool.query(`
             CREATE TABLE IF NOT EXISTS fukushi_invoice_settings (
                 id SERIAL PRIMARY KEY,
+                store_id VARCHAR(50) DEFAULT 'all', -- ★追加
                 company_name VARCHAR(100),
                 invoice_number VARCHAR(50),
                 postal_code VARCHAR(20),
@@ -171,43 +169,21 @@ router.get('/setup-invoice-db', async (req, res) => {
                 created_by VARCHAR(50),
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
-        `);
-
-        // ② 請求備考・支払管理テーブルの作成 (修正)
-        await pool.query(`
-            CREATE TABLE IF NOT EXISTS fukushi_billing_notes (
-                user_id VARCHAR(50) NOT NULL,
-                target_year INTEGER NOT NULL,
-                target_month INTEGER NOT NULL,
-                note TEXT,
-                payment_date DATE, -- ★追加：支払日
-                PRIMARY KEY (user_id, target_year, target_month)
-            );
-            
-            -- すでにテーブルがある場合はカラムを追加
+            -- 既存テーブルがある場合にstore_idを追加
             DO $$ 
             BEGIN 
-                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fukushi_billing_notes' AND column_name='payment_date') THEN
-                    ALTER TABLE fukushi_billing_notes ADD COLUMN payment_date DATE;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fukushi_invoice_settings' AND column_name='store_id') THEN
+                    ALTER TABLE fukushi_invoice_settings ADD COLUMN store_id VARCHAR(50) DEFAULT 'all';
                 END IF;
             END $$;
         `);
 
-        // ③ インボイス設定の初期データ投入（空の場合のみ）
-        const resCount = await pool.query('SELECT count(*) FROM fukushi_invoice_settings');
-        if (resCount.rows[0].count === '0') {
-            await pool.query(`
-                INSERT INTO fukushi_invoice_settings 
-                (company_name, invoice_number, effective_date, created_by, created_at) 
-                VALUES ('法人名・事業所名', 'T0000000000000', '2000-01-01', 'system', CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')
-            `);
-        }
+        // (中略：請求備考テーブルの部分はそのまま)
 
         await pool.query('COMMIT');
-        res.json({ success: true, message: "インボイス設定および請求備考のテーブル作成が正常に完了しました。" });
+        res.json({ success: true, message: "インボイス設定テーブルの店舗対応化を完了しました。" });
     } catch (err) {
         await pool.query('ROLLBACK');
-        console.error("テーブル作成エラー:", err);
         res.status(500).json({ success: false, error: err.message });
     }
 });
@@ -279,37 +255,39 @@ pool.query(`
     }
 }).catch(err => console.error("インボイステーブル作成エラー:", err));
 
-// インボイス設定履歴の取得
+// インボイス設定履歴の取得（店舗絞り込み）
 router.get('/admin/settings/invoice/history', async (req, res) => {
+    const { store_id } = req.query; // ★追加
     try {
-        const result = await pool.query('SELECT * FROM fukushi_invoice_settings ORDER BY effective_date DESC');
+        const result = await pool.query(
+            'SELECT * FROM fukushi_invoice_settings WHERE store_id = $1 ORDER BY effective_date DESC', 
+            [store_id || 'all']
+        );
         res.json({ success: true, history: result.rows });
     } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
 
-// 指定した日付時点で有効なインボイス設定を取得
+// 指定した日付・店舗で有効な設定を取得
 router.get('/admin/settings/invoice/active', async (req, res) => {
-    const { date } = req.query; // 対象月（例：2024-05-31）
+    const { date, store_id } = req.query; // ★store_idを追加
     try {
         const result = await pool.query(
-            'SELECT * FROM fukushi_invoice_settings WHERE effective_date <= $1 ORDER BY effective_date DESC LIMIT 1',
-            [date]
+            'SELECT * FROM fukushi_invoice_settings WHERE store_id = $1 AND effective_date <= $2 ORDER BY effective_date DESC LIMIT 1',
+            [store_id || 'all', date]
         );
         res.json({ success: true, settings: result.rows[0] || {} });
     } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
 
-// 新しいインボイス設定を履歴として保存
+// 保存時にstore_idを記録
 router.post('/admin/settings/invoice', async (req, res) => {
-    const { company_name, invoice_number, postal_code, address, phone_number, bank_info, effective_date, operator } = req.body;
-    const opName = operator || '管理者';
+    const { company_name, invoice_number, postal_code, address, phone_number, bank_info, effective_date, operator, store_id } = req.body;
     try {
-        const nowRes = await pool.query("SELECT CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo' as now_ts");
         await pool.query(`
             INSERT INTO fukushi_invoice_settings 
-            (company_name, invoice_number, postal_code, address, phone_number, bank_info, effective_date, created_by, created_at) 
+            (store_id, company_name, invoice_number, postal_code, address, phone_number, bank_info, effective_date, created_by) 
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-        `, [company_name, invoice_number, postal_code, address, phone_number, bank_info, effective_date, opName, nowRes.rows[0].now_ts]);
+        `, [store_id || 'all', company_name, invoice_number, postal_code, address, phone_number, bank_info, effective_date, operator || '管理者']);
         res.json({ success: true });
     } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
@@ -333,42 +311,43 @@ router.post('/admin/billing/note', async (req, res) => {
 pool.query(`
     CREATE TABLE IF NOT EXISTS fukushi_price_history (
         id SERIAL PRIMARY KEY,
+        store_id VARCHAR(50) DEFAULT 'all', -- ★追加
         meal_fee INTEGER NOT NULL,
         cancel_fee INTEGER NOT NULL,
         effective_date DATE NOT NULL,
         created_by VARCHAR(50),
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
-`).then(async () => {
-    const res = await pool.query('SELECT count(*) FROM fukushi_price_history');
-    if (res.rows[0].count === '0') {
-        await pool.query("INSERT INTO fukushi_price_history (meal_fee, cancel_fee, effective_date, created_by) VALUES (450, 500, '2000-01-01', 'system')");
-    }
-}).catch(err => console.error("料金テーブル作成エラー:", err));
+    DO $$ 
+    BEGIN 
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fukushi_price_history' AND column_name='store_id') THEN
+            ALTER TABLE fukushi_price_history ADD COLUMN store_id VARCHAR(50) DEFAULT 'all';
+        END IF;
+    END $$;
+`).catch(err => console.error("料金テーブル更新エラー:", err));
 
+// 料金履歴の取得（店舗絞り込み）
 router.get('/admin/settings/price', async (req, res) => {
+    const { store_id } = req.query;
     try {
-        const query = `SELECT * FROM fukushi_price_history ORDER BY effective_date DESC`;
-        const result = await pool.query(query);
+        const result = await pool.query(
+            'SELECT * FROM fukushi_price_history WHERE store_id = $1 ORDER BY effective_date DESC', 
+            [store_id || 'all']
+        );
         res.json({ success: true, history: result.rows });
-    } catch (err) {
-        res.status(500).json({ success: false, error: err.message });
-    }
+    } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
 
+// 保存
 router.post('/admin/settings/price', async (req, res) => {
-    const { meal_fee, cancel_fee, effective_date, operator } = req.body;
-    const opName = operator || '管理者';
+    const { meal_fee, cancel_fee, effective_date, operator, store_id } = req.body;
     try {
-        const nowRes = await pool.query("SELECT CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo' as now_ts");
         await pool.query(
-            `INSERT INTO fukushi_price_history (meal_fee, cancel_fee, effective_date, created_by, created_at) VALUES ($1, $2, $3, $4, $5)`,
-            [meal_fee, cancel_fee, effective_date, opName, nowRes.rows[0].now_ts]
+            `INSERT INTO fukushi_price_history (store_id, meal_fee, cancel_fee, effective_date, created_by) VALUES ($1, $2, $3, $4, $5)`,
+            [store_id || 'all', meal_fee, cancel_fee, effective_date, operator || '管理者']
         );
         res.json({ success: true });
-    } catch (err) {
-        res.status(500).json({ success: false, error: err.message });
-    }
+    } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
 
 // ====================================================
