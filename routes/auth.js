@@ -1696,4 +1696,36 @@ router.post('/admin/closing-operations/save', async (req, res) => {
     }
 });
 
+// ==========================================
+// ★ 追加：打刻データの新規登録（手動追加）API
+// ==========================================
+router.post('/admin/attendance/create-new', async (req, res) => {
+    const { userId, date, planIn, planOut, actIn, actOut, note } = req.body;
+    
+    // PostgreSQLの時刻型エラーを防ぐため、空文字("")を確実にNULLへ変換
+    const pIn = planIn === "" ? null : planIn;
+    const pOut = planOut === "" ? null : planOut;
+    const aIn = actIn === "" ? null : actIn;
+    const aOut = actOut === "" ? null : actOut;
+
+    try {
+        await pool.query(`
+            INSERT INTO fukushi_schedules (user_id, plan_date, plan_in, plan_out, act_in, act_out, note)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            ON CONFLICT (user_id, plan_date)
+            DO UPDATE SET 
+                plan_in = EXCLUDED.plan_in, 
+                plan_out = EXCLUDED.plan_out, 
+                act_in = EXCLUDED.act_in, 
+                act_out = EXCLUDED.act_out, 
+                note = EXCLUDED.note
+        `, [userId, date, pIn, pOut, aIn, aOut, note]);
+        
+        res.json({ success: true });
+    } catch (err) {
+        console.error("新規打刻登録エラー:", err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 module.exports = router;
