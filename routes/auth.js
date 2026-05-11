@@ -224,6 +224,10 @@ router.get('/setup-invoice-db', async (req, res) => {
                 IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fukushi_invoice_settings' AND column_name='store_id') THEN
                     ALTER TABLE fukushi_invoice_settings ADD COLUMN store_id VARCHAR(50) DEFAULT 'all';
                 END IF;
+                -- ★追加：effective_dateカラムがない場合、安全に自動追加する
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fukushi_invoice_settings' AND column_name='effective_date') THEN
+                    ALTER TABLE fukushi_invoice_settings ADD COLUMN effective_date DATE NOT NULL DEFAULT '2000-01-01';
+                END IF;
             END $$;
         `);
 
