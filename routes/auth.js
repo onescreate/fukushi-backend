@@ -555,7 +555,7 @@ router.get('/admin/schedule-list', async (req, res) => {
     const sId = store_id || 'all';
     try {
         const [y, m] = date.split('-');
-        const query = `SELECT s.plan_id as "planId", TO_CHAR(s.plan_date, 'YYYY/MM/DD') as date, u.last_name || ' ' || u.first_name as name, s.plan_in as "planIn", s.plan_out as "planOut", COALESCE(m.status, 'なし') as meal, s.status, s.note
+        const query = `SELECT s.plan_id as "planId", TO_CHAR(s.plan_date, 'YYYY/MM/DD') as date, u.last_name || ' ' || u.first_name as name, s.plan_in as "planIn", s.plan_out as "planOut", COALESCE(m.status, 'なし') as meal, s.status, s.note, TO_CHAR(s.created_at AT TIME ZONE 'Asia/Tokyo', 'MM/DD HH24:MI') as "appliedAt"
             FROM fukushi_schedules s JOIN fukushi_users u ON s.user_id = u.user_id LEFT JOIN fukushi_meals m ON s.user_id = m.user_id AND s.plan_date = m.meal_date
             WHERE s.plan_date >= $1 AND s.plan_date <= $2 AND ($3::text = 'all' OR u.store_id = $3)`;
         const result = await pool.query(query, [`${y}-${m}-01`, `${y}-${m}-31`, sId]);
