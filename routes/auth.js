@@ -184,7 +184,7 @@ router.get('/setup-invoice-db', async (req, res) => {
         res.json({ success: true, message: "インボイス設定テーブルの店舗対応化を完了しました。" });
     } catch (err) {
         await pool.query('ROLLBACK');
-        res.status(500).json({ success: false, error: err.message });
+        res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" });
     }
 });
 
@@ -217,7 +217,7 @@ router.get('/setup-health-db', async (req, res) => {
         res.json({ success: true, message: "健康管理テーブルの作成・更新が完了しました。" });
     } catch (err) {
         console.error("テーブル作成エラー:", err);
-        res.status(500).json({ success: false, error: err.message });
+        res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" });
     }
 });
 
@@ -264,7 +264,7 @@ router.get('/admin/settings/invoice/history', async (req, res) => {
             [store_id || 'all']
         );
         res.json({ success: true, history: result.rows });
-    } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+    } catch (err) { console.error("システムエラー:", err); res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" }); }
 });
 
 // 指定した日付・店舗で有効な設定を取得
@@ -276,7 +276,7 @@ router.get('/admin/settings/invoice/active', async (req, res) => {
             [store_id || 'all', date]
         );
         res.json({ success: true, settings: result.rows[0] || {} });
-    } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+    } catch (err) { console.error("システムエラー:", err); res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" }); }
 });
 
 // 保存時にstore_idを記録
@@ -289,7 +289,7 @@ router.post('/admin/settings/invoice', async (req, res) => {
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         `, [store_id || 'all', company_name, invoice_number, postal_code, address, phone_number, bank_info, effective_date, operator || '管理者']);
         res.json({ success: true });
-    } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+    } catch (err) { console.error("システムエラー:", err); res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" }); }
 });
 
 router.post('/admin/billing/note', async (req, res) => {
@@ -302,7 +302,7 @@ router.post('/admin/billing/note', async (req, res) => {
             DO UPDATE SET note = EXCLUDED.note
         `, [user_id, year, month, note]);
         res.json({ success: true });
-    } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+    } catch (err) { console.error("システムエラー:", err); res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" }); }
 });
 
 // ====================================================
@@ -335,7 +335,7 @@ router.get('/admin/settings/price', async (req, res) => {
             [store_id || 'all']
         );
         res.json({ success: true, history: result.rows });
-    } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+    } catch (err) { console.error("システムエラー:", err); res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" }); }
 });
 
 // 保存
@@ -347,7 +347,7 @@ router.post('/admin/settings/price', async (req, res) => {
             [store_id || 'all', meal_fee, cancel_fee, effective_date, operator || '管理者']
         );
         res.json({ success: true });
-    } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+    } catch (err) { console.error("システムエラー:", err); res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" }); }
 });
 
 // ====================================================
@@ -443,7 +443,7 @@ router.post('/user/schedule/submit', async (req, res) => {
         res.json({ success: true });
     } catch (err) {
         await pool.query('ROLLBACK');
-        res.status(500).json({ success: false, error: err.message });
+        res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" });
     }
 });
 
@@ -481,7 +481,7 @@ router.get('/admin/daily-roster', async (req, res) => {
             meal: r.meal_situation || r.meal_status || 'なし', currentStamp: stampMap[r.user_id] || '未打刻'
         }));
         res.json({ success: true, roster });
-    } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+    } catch (err) { console.error("システムエラー:", err); res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" }); }
 });
 
 router.get('/admin/pending-approvals', async (req, res) => {
@@ -494,7 +494,7 @@ router.get('/admin/pending-approvals', async (req, res) => {
             ORDER BY s.plan_date ASC`;
         const result = await pool.query(query, [sId]);
         res.json({ success: true, list: result.rows });
-    } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+    } catch (err) { console.error("システムエラー:", err); res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" }); }
 });
 
 router.get('/admin/schedule-list', async (req, res) => {
@@ -507,7 +507,7 @@ router.get('/admin/schedule-list', async (req, res) => {
             WHERE s.plan_date >= $1 AND s.plan_date <= $2 AND ($3::text = 'all' OR u.store_id = $3)`;
         const result = await pool.query(query, [`${y}-${m}-01`, `${y}-${m}-31`, sId]);
         res.json({ success: true, list: result.rows });
-    } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+    } catch (err) { console.error("システムエラー:", err); res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" }); }
 });
 
 router.get('/admin/attendance-list', async (req, res) => {
@@ -529,7 +529,7 @@ router.get('/admin/attendance-list', async (req, res) => {
             note: r.note || ''
         }));
         res.json({ success: true, list });
-    } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+    } catch (err) { console.error("システムエラー:", err); res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" }); }
 });
 
 router.get('/admin/attendance/missing-count', async (req, res) => {
@@ -541,7 +541,7 @@ router.get('/admin/attendance/missing-count', async (req, res) => {
         AND ($1::text = 'all' OR u.store_id = $1)`;
         const result = await pool.query(query, [sId]);
         res.json({ success: true, count: parseInt(result.rows[0].count) });
-    } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+    } catch (err) { console.error("システムエラー:", err); res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" }); }
 });
 
 router.get('/user/schedule/monthly', async (req, res) => {
@@ -553,7 +553,7 @@ router.get('/user/schedule/monthly', async (req, res) => {
         let schedule = {};
         result.rows.forEach(r => { schedule[r.date] = r; });
         res.json({ success: true, schedule });
-    } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+    } catch (err) { console.error("システムエラー:", err); res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" }); }
 });
 
 
@@ -569,7 +569,7 @@ router.post('/admin/schedule/update-status', async (req, res) => {
         sql += ` WHERE plan_id = $4`;
         await pool.query(sql, [status, operator || '管理者', nowRes.rows[0].now_ts, plan_id]);
         res.json({ success: true });
-    } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+    } catch (err) { console.error("システムエラー:", err); res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" }); }
 });
 
 router.post('/admin/attendance/update-time', async (req, res) => {
@@ -579,7 +579,7 @@ router.post('/admin/attendance/update-time', async (req, res) => {
         await pool.query(`UPDATE fukushi_schedules SET plan_in = $1, plan_out = $2, act_in = $3, act_out = $4, note = $5, updated_by = $6, updated_at = $7 WHERE plan_id = $8`,
             [plan_in || null, plan_out || null, act_in || null, act_out || null, note, operator || '管理者', nowRes.rows[0].now_ts, plan_id]);
         res.json({ success: true });
-    } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+    } catch (err) { console.error("システムエラー:", err); res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" }); }
 });
 
 router.post('/admin/attendance/absent', async (req, res) => {
@@ -599,7 +599,7 @@ router.post('/admin/attendance/absent', async (req, res) => {
         res.json({ success: true });
     } catch (err) {
         await pool.query('ROLLBACK');
-        res.status(500).json({ success: false, error: err.message });
+        res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" });
     }
 });
 
@@ -631,7 +631,7 @@ router.post('/admin/meal/update-status', async (req, res) => {
         res.json({ success: true });
     } catch (err) {
         await pool.query('ROLLBACK');
-        res.status(500).json({ success: false, error: err.message });
+        res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" });
     }
 });
 
@@ -678,7 +678,7 @@ router.post('/admin/attendance/update-detail', async (req, res) => {
         res.json({ success: true });
     } catch (err) {
         await pool.query('ROLLBACK');
-        res.status(500).json({ success: false, error: err.message });
+        res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" });
     }
 });
 
@@ -718,7 +718,7 @@ router.post('/user/meal/submit', async (req, res) => {
     } catch (err) {
         await pool.query('ROLLBACK');
         console.error("食事一括登録エラー:", err);
-        res.status(500).json({ success: false, error: err.message });
+        res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" });
     }
 });
 
@@ -754,7 +754,7 @@ router.get('/admin/meal-list', async (req, res) => {
             status: r.status, price: r.price || 300, situation: r.situation || ''
         }));
         res.json({ success: true, list });
-    } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+    } catch (err) { console.error("システムエラー:", err); res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" }); }
 });
 
 // 2. 食事注文の追加・編集 (自動料金計算＆2週間ルール対応)
@@ -828,7 +828,7 @@ router.post('/admin/meal/save', async (req, res) => {
         res.json({ success: true });
     } catch (err) {
         await pool.query('ROLLBACK');
-        res.status(500).json({ success: false, error: err.message });
+        res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" });
     }
 });
 
@@ -839,7 +839,7 @@ router.post('/admin/meal/delete', async (req, res) => {
         await pool.query('DELETE FROM fukushi_meals WHERE meal_id = $1', [meal_id]);
         res.json({ success: true });
     } catch (err) {
-        res.status(500).json({ success: false, error: err.message });
+        res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" });
     }
 });
 
@@ -862,7 +862,7 @@ router.get('/admin/meal/pending-count', async (req, res) => {
         res.json({ success: true, count: parseInt(result.rows[0].count) });
     } catch (err) {
         console.error("食事通知カウントエラー:", err);
-        res.status(500).json({ success: false, error: err.message });
+        res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" });
     }
 });
 
@@ -908,7 +908,7 @@ router.get('/admin/billing-list', async (req, res) => {
             status: r.payment_date ? '支払済' : '未請求' // ★フロントで使いやすいようにステータス付与
         }));
         res.json({ success: true, list });
-    } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+    } catch (err) { console.error("システムエラー:", err); res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" }); }
 });
 
 // ====================================================
@@ -946,7 +946,7 @@ router.get('/setup-delivery-db', async (req, res) => {
         res.json({ success: true, message: "食事納品管理用のテーブル構成（店舗対応版）を更新しました。" });
     } catch (err) {
         console.error("納品テーブル更新エラー:", err);
-        res.status(500).json({ success: false, error: err.message });
+        res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" });
     }
 });
 
@@ -1000,7 +1000,7 @@ router.get('/admin/meal-delivery/monthly', async (req, res) => {
         res.json({ success: true, summary });
     } catch (err) {
         console.error("納品管理取得エラー:", err);
-        res.status(500).json({ success: false, error: err.message });
+        res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" });
     }
 });
 
@@ -1024,7 +1024,7 @@ router.post('/admin/meal-delivery/save', async (req, res) => {
         `, [date, sId, deliveredCount, note, operator || '管理者']);
         res.json({ success: true });
     } catch (err) {
-        res.status(500).json({ success: false, error: err.message });
+        res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" });
     }
 });
 
@@ -1045,7 +1045,7 @@ router.get('/admin/delivery/today-status', async (req, res) => {
         res.json({ success: true, isRegistered });
     } catch (err) {
         console.error("本日の納品状況取得エラー:", err);
-        res.status(500).json({ success: false, error: err.message });
+        res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" });
     }
 });
 
@@ -1078,7 +1078,7 @@ router.get('/admin/billing/unpaid-count', async (req, res) => {
         res.json({ success: true, count: parseInt(result.rows[0].count) });
     } catch (err) {
         console.error("未払いカウントエラー:", err);
-        res.status(500).json({ success: false, error: err.message });
+        res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" });
     }
 });
 
@@ -1093,7 +1093,7 @@ router.post('/admin/billing/payment', async (req, res) => {
             DO UPDATE SET payment_date = EXCLUDED.payment_date
         `, [user_id, year, month, payment_date || null]);
         res.json({ success: true });
-    } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+    } catch (err) { console.error("システムエラー:", err); res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" }); }
 });
 
 // ====================================================
@@ -1152,7 +1152,7 @@ router.post('/user/health-record', async (req, res) => {
     } catch (err) { 
         console.error("健康記録保存エラー:", err);
         // 推測せずに具体的なエラー内容をフロントエンドに返す
-        res.status(500).json({ success: false, error: err.message }); 
+        res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" }); 
     }
 });
 
@@ -1242,7 +1242,7 @@ router.get('/setup-sample-users', async (req, res) => {
         });
     } catch (err) {
         console.error("サンプルユーザー追加エラー:", err);
-        res.status(500).json({ success: false, error: err.message });
+        res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" });
     }
 });
 
@@ -1266,7 +1266,7 @@ router.get('/user/today', async (req, res) => {
         res.json({ success: true, today });
     } catch (err) {
         console.error("今日の予定取得エラー:", err);
-        res.status(500).json({ success: false, error: err.message });
+        res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" });
     }
 });
 
@@ -1293,7 +1293,7 @@ router.get('/admin/health/missing-count', async (req, res) => {
         const result = await pool.query(query, [firstDayOfMonth, sId]);
         res.json({ success: true, count: parseInt(result.rows[0].count) });
     } catch (err) {
-        res.status(500).json({ success: false, error: err.message });
+        res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" });
     }
 });
 
@@ -1320,7 +1320,7 @@ router.get('/admin/meal/pending-count', async (req, res) => {
         const result = await pool.query(query, [sId]);
         res.json({ success: true, count: parseInt(result.rows[0].count) });
     } catch (err) {
-        res.status(500).json({ success: false, error: err.message });
+        res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" });
     }
 });
 
@@ -1352,7 +1352,7 @@ router.get('/setup-user-master-db', async (req, res) => {
         `);
         res.json({ success: true, message: "データベース構成（店舗ID等）を更新しました。" });
     } catch (err) {
-        res.status(500).json({ success: false, error: err.message });
+        res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" });
     }
 });
 
@@ -1408,7 +1408,7 @@ router.post('/admin/user-master/save', async (req, res) => {
         res.json({ success: true });
     } catch (err) { 
         console.error("利用者マスタ保存エラー:", err);
-        res.status(500).json({ success: false, error: err.message }); 
+        res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" }); 
     }
 });
 // ==========================================
@@ -1429,7 +1429,7 @@ router.delete('/admin/user-master/:id', async (req, res) => {
         if (err.code === '23503') {
             return res.status(400).json({ success: false, error: "この利用者はすでに打刻や実績データが存在するため、物理削除できません。「ステータス」を「退所」に変更して対応してください。" });
         }
-        res.status(500).json({ success: false, error: err.message });
+        res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" });
     }
 });
 
@@ -1479,7 +1479,7 @@ router.get('/setup-store-db', async (req, res) => {
         `);
         res.json({ success: true, message: "店舗情報テーブルの構成を完了しました。" });
     } catch (err) {
-        res.status(500).json({ success: false, error: err.message });
+        res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" });
     }
 });
 
@@ -1489,7 +1489,7 @@ router.get('/admin/stores', async (req, res) => {
         const result = await pool.query('SELECT * FROM fukushi_stores ORDER BY store_id ASC');
         res.json({ success: true, stores: result.rows });
     } catch (err) {
-        res.status(500).json({ success: false, error: err.message });
+        res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" });
     }
 });
 
@@ -1511,7 +1511,7 @@ router.post('/admin/stores/save', async (req, res) => {
         }
         res.json({ success: true });
     } catch (err) {
-        res.status(500).json({ success: false, error: err.message });
+        res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" });
     }
 });
 
@@ -1548,7 +1548,7 @@ router.get('/setup-admin-master-db', async (req, res) => {
             END $$;
         `);
         res.json({ success: true, message: "管理者マスタテーブルの構成を完了しました。" });
-    } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+    } catch (err) { console.error("システムエラー:", err); res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" }); }
 });
 
 // 管理者一覧取得
@@ -1563,7 +1563,7 @@ router.get('/admin/admin-master', async (req, res) => {
         `);
         res.json({ success: true, admins: result.rows });
     } catch (err) {
-        res.status(500).json({ success: false, error: err.message });
+        res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" });
     }
 });
 
@@ -1597,7 +1597,7 @@ router.post('/admin/admin-master/save', async (req, res) => {
         }
         res.json({ success: true });
     } catch (err) { 
-        res.status(500).json({ success: false, error: err.message }); 
+        res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" }); 
     }
 });
 
@@ -1607,7 +1607,7 @@ router.delete('/admin/admin-master/:id', async (req, res) => {
         await pool.query('DELETE FROM fukushi_admins WHERE admin_id = $1', [req.params.id]);
         res.json({ success: true });
     } catch (err) {
-        res.status(500).json({ success: false, error: err.message });
+        res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" });
     }
 });
 
@@ -1623,7 +1623,7 @@ router.delete('/admin/stores/:id', async (req, res) => {
         if (err.code === '23503') {
             return res.status(400).json({ success: false, error: "この店舗に紐づいている管理者や利用者がいるため削除できません。" });
         }
-        res.status(500).json({ success: false, error: err.message });
+        res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" });
     }
 });
 
@@ -1660,7 +1660,7 @@ router.get('/admin/closing-operations', async (req, res) => {
         res.json({ success: true, list: filteredList });
     } catch (err) {
         console.error("締め業務リスト取得エラー:", err);
-        res.status(500).json({ success: false, error: err.message });
+        res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" });
     }
 });
 
@@ -1699,7 +1699,7 @@ router.post('/admin/closing-operations/save', async (req, res) => {
     } catch (err) {
         await pool.query('ROLLBACK');
         console.error("加算保存エラー:", err);
-        res.status(500).json({ success: false, error: err.message });
+        res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" });
     }
 });
 
@@ -1731,7 +1731,7 @@ router.post('/admin/attendance/create-new', async (req, res) => {
         res.json({ success: true });
     } catch (err) {
         console.error("新規打刻登録エラー:", err);
-        res.status(500).json({ success: false, error: err.message });
+        res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" });
     }
 });
 
@@ -1757,7 +1757,7 @@ router.get('/user/past-absences', async (req, res) => {
         res.json({ success: true, list: result.rows });
     } catch (err) {
         console.error("過去の欠席取得エラー:", err);
-        res.status(500).json({ success: false, error: err.message });
+        res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" });
     }
 });
 
@@ -1777,7 +1777,7 @@ router.post('/user/past-absences/reason', async (req, res) => {
         res.json({ success: true });
     } catch (err) {
         console.error("欠席理由保存エラー:", err);
-        res.status(500).json({ success: false, error: err.message });
+        res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" });
     }
 });
 
