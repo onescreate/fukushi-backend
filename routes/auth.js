@@ -62,10 +62,59 @@ router.get('/users', async (req, res) => {
         const result = await pool.query('SELECT user_id, last_name, first_name FROM fukushi_users ORDER BY user_id ASC');
         res.json({ success: true, users: result.rows });
     } catch (err) {
-        console.error(err);
-        res.status(500).json({ success: false, message: 'サーバーエラー' });
+        console.error("システムエラー:", err); res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" });
     }
 });
+
+// ====================================================
+// ★ セキュリティ：認可の門番（ミドルウェア）の配置
+// ====================================================
+
+// 門番1: 管理者(Admin)用トークンの検証
+const verifyAdminToken = (req, res, next) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ success: false, error: 'セキュリティ保護: 認証トークンがありません' });
+    }
+    const token = authHeader.split(' ')[1];
+    try {
+        // .envに設定したJWT_SECRETを使って、偽造された身分証でないか検証
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        req.admin = decoded; // 検証に成功したら、トークンの中身(id, role等)を変数に保持
+        next(); // 通行許可（次のAPI処理へ進む）
+    } catch (err) {
+        return res.status(401).json({ success: false, error: 'セキュリティ保護: 認証トークンの期限切れ、または無効です' });
+    }
+};
+
+// 門番2: 利用者(User)用トークンの検証
+const verifyUserToken = (req, res, next) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ success: false, error: 'セキュリティ保護: 認証トークンがありません' });
+    }
+    const token = authHeader.split(' ')[1];
+    try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        req.user = decoded;
+        next();
+    } catch (err) {
+        return res.status(401).json({ success: false, error: 'セキュリティ保護: 認証トークンの期限切れ、または無効です' });
+    }
+};
+
+// 門番3: 【全権管理者】のみ通行許可する最も厳しいチェック
+const requireSuperAdmin = (req, res, next) => {
+    if (!req.admin || req.admin.role !== 'super_admin') {
+        return res.status(403).json({ success: false, error: 'セキュリティ保護: この操作は全権管理者（super_admin）のみ実行可能です' });
+    }
+    next();
+};
+
+// ★ ここから下に書かれているURLに対して、自動的に門番を適用する設定
+// ※ '/admin' から始まるURLには「門番1」を、'/user' から始まるURLには「門番2」を自動配置
+router.use('/admin', verifyAdminToken);
+router.use('/user', verifyUserToken);
 
 
 // ====================================================
@@ -1414,7 +1463,7 @@ router.post('/admin/user-master/save', async (req, res) => {
 // ==========================================
 // ★ 追加：利用者マスタの削除API
 // ==========================================
-router.delete('/admin/user-master/:id', async (req, res) => {
+router.delete('/admin/user-master/:id', requireSuperAdmin, async (req, res) => {
     try {
         const userId = req.params.id;
         
@@ -1602,7 +1651,7 @@ router.post('/admin/admin-master/save', async (req, res) => {
 });
 
 // 管理者削除
-router.delete('/admin/admin-master/:id', async (req, res) => {
+router.delete('/admin/admin-master/:id', requireSuperAdmin, async (req, res) => {
     try {
         await pool.query('DELETE FROM fukushi_admins WHERE admin_id = $1', [req.params.id]);
         res.json({ success: true });
@@ -1612,7 +1661,7 @@ router.delete('/admin/admin-master/:id', async (req, res) => {
 });
 
 // 店舗の削除API
-router.delete('/admin/stores/:id', async (req, res) => {
+router.delete('/admin/stores/:id', requireSuperAdmin, async (req, res) => {
     const { id } = req.params;
     try {
         // ※テーブル名が 'stores' または 'fukushi_stores' など、実際の環境に合わせてください

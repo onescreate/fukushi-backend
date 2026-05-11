@@ -1,20 +1,20 @@
 const { Pool } = require('pg');
-require('dotenv').config();
 
-const dbConfig = {
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_NAME,
-};
+// 環境変数から設定を読み込む
+const isProduction = process.env.NODE_ENV === 'production';
 
-if (process.env.INSTANCE_UNIX_SOCKET) {
-    // ★ここが修正ポイントです（ `/cloudsql/` を付け足しました）
-    dbConfig.host = `/cloudsql/${process.env.INSTANCE_UNIX_SOCKET}`;
-} else {
-    dbConfig.host = process.env.DB_HOST;
-    dbConfig.port = process.env.DB_PORT;
-}
+const pool = new Pool({
+  user: process.env.DB_USER,          // DBユーザー名
+  host: isProduction ? `/cloudsql/${process.env.INSTANCE_CONNECTION_NAME}` : process.env.DB_HOST, 
+  database: process.env.DB_NAME,      // データベース名
+  password: process.env.DB_PASSWORD,  // パスワード
+  port: process.env.DB_PORT || 5432,
+});
 
-const pool = new Pool(dbConfig);
+// 接続確認ログ（本番ではエラー時のみ）
+pool.on('error', (err) => {
+  console.error('Unexpected error on idle client', err);
+  process.exit(-1);
+});
 
 module.exports = pool;
