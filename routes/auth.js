@@ -555,10 +555,11 @@ router.get('/admin/schedule-list', async (req, res) => {
     const sId = store_id || 'all';
     try {
         const [y, m] = date.split('-');
+        const lastDay = new Date(parseInt(y), parseInt(m), 0).getDate();
         const query = `SELECT s.plan_id as "planId", TO_CHAR(s.plan_date, 'YYYY/MM/DD') as date, u.last_name || ' ' || u.first_name as name, s.plan_in as "planIn", s.plan_out as "planOut", COALESCE(m.status, 'なし') as meal, s.status, s.note, TO_CHAR(s.created_at AT TIME ZONE 'Asia/Tokyo', 'MM/DD HH24:MI') as "appliedAt"
             FROM fukushi_schedules s JOIN fukushi_users u ON s.user_id = u.user_id LEFT JOIN fukushi_meals m ON s.user_id = m.user_id AND s.plan_date = m.meal_date
             WHERE s.plan_date >= $1 AND s.plan_date <= $2 AND ($3::text = 'all' OR u.store_id = $3)`;
-        const result = await pool.query(query, [`${y}-${m}-01`, `${y}-${m}-31`, sId]);
+        const result = await pool.query(query, [`${y}-${m}-01`, `${y}-${m}-${lastDay}`, sId]);
         res.json({ success: true, list: result.rows });
     } catch (err) { console.error("システムエラー:", err); res.status(500).json({ success: false, error: "サーバー処理中にエラーが発生しました" }); }
 });
@@ -600,8 +601,9 @@ router.get('/admin/attendance/missing-count', async (req, res) => {
 router.get('/user/schedule/monthly', async (req, res) => {
     const { user_id, year, month } = req.query;
     try {
+        const lastDay = new Date(parseInt(year), parseInt(month), 0).getDate();
         const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
-        const endDate = `${year}-${String(month).padStart(2, '0')}-31`;
+        const endDate = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
         const result = await pool.query(`SELECT TO_CHAR(s.plan_date, 'YYYY/MM/DD') as date, s.plan_in as "planIn", s.plan_out as "planOut", s.status, s.note, m.status as meal FROM fukushi_schedules s LEFT JOIN fukushi_meals m ON s.user_id = m.user_id AND s.plan_date = m.meal_date WHERE s.user_id = $1 AND s.plan_date >= $2 AND s.plan_date <= $3`, [user_id, startDate, endDate]);
         let schedule = {};
         result.rows.forEach(r => { schedule[r.date] = r; });
