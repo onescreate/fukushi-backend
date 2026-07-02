@@ -1,0 +1,167 @@
+// ============================================================
+//  就労支援施設 利用者管理システム — DBスキーマ
+//  Phase 0: テナント（法人→店舗）＋認証コア
+//  詳細は docs/01_システム設計書.md 6章を参照
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------- 列挙型 ----------
+
+/// 職員のロール（権限の束。設計書5.2）
+enum Role {
+  system_admin // ベンダー（全法人）
+  corporation_admin // 法人管理者（自法人・全店舗）
+  facility_admin // 店舗管理者（割当店舗）
+  staff // 一般スタッフ（割当店舗）
+}
+
+/// 施設のサービス種別（加算の適用可否に影響）
+enum ServiceType {
+  transition // 就労移行支援
+  continuous_a // 就労継続支援A型
+  continuous_b // 就労継続支援B型
+  other
+}
+
+/// 法人・店舗・端末の状態
+enum EntityStatus {
+  active
+  inactive
+}
+
+/// 利用者の状態
+enum UserStatus {
+  active // 利用中
+  withdrawn // 退所
+}
+
+// ---------- テナント ----------
+
+/// 法人（テナント最上位）
+model Corporation {
+  id        String       @id @default(uuid()) @db.Uuid
+  name      String
+  status    EntityStatus @default(active)
+  createdAt DateTime     @default(now()) @map("created_at")
+  updatedAt DateTime     @updatedAt @map("updated_at")
+
+  facilities Facility[]
+  staff      Staff[]
+  users      User[]
+
+  @@map("corporations")
+}
+
+/// 店舗／施設
+model Facility {
+  id            String       @id @default(uuid()) @db.Uuid
+  corporationId String       @map("corporation_id") @db.Uuid
+  name          String
+  serviceType   ServiceType? @map("service_type")
+  email         String?
+  status        EntityStatus @default(active)
+  remarks       String?
+  createdAt     DateTime     @default(now()) @map("created_at")
+  updatedAt     DateTime     @updatedAt @map("updated_at")
+
+  corporation  Corporation         @relation(fields: [corporationId], references: [id], onDelete: Restrict)
+  users        User[]
+  staffRoles   StaffFacilityRole[]
+  kioskDevices KioskDevice[]
+
+  @@index([corporationId])
+  @@map("facilities")
+}
+
+// ---------- 認証：職員 ----------
+
+/// 職員（管理画面ユーザー）。認証はFirebase（emailベース）。
+model Staff {
+  id            String       @id @default(uuid()) @db.Uuid
+  corporationId String       @map("corporation_id") @db.Uuid
+  firebaseUid   String?      @unique @map("firebase_uid")
+  lastName      String       @map("last_name")
+  firstName     String       @map("first_name")
+  email         String       @unique
+  status        EntityStatus @default(active)
+  createdAt     DateTime     @default(now()) @map("created_at")
+  updatedAt     DateTime     @updatedAt @map("updated_at")
+
+  corporation   Corporation         @relation(fields: [corporationId], references: [id], onDelete: Restrict)
+  facilityRoles StaffFacilityRole[]
+
+  @@index([corporationId])
+  @@map("staff")
+}
+
+/// 職員×店舗×ロールの割当（facilityId=null は法人全体を意味する）
+model StaffFacilityRole {
+  id         String   @id @default(uuid()) @db.Uuid
+  staffId    String   @map("staff_id") @db.Uuid
+  facilityId String?  @map("facility_id") @db.Uuid
+  role       Role
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  staff    Staff     @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  facility Facility? @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+
+  @@unique([staffId, facilityId, role])
+  @@index([facilityId])
+  @@map("staff_facility_roles")
+}
+
+// ---------- 認証：利用者 ----------
+
+/// 利用者。自宅ログイン=Firebase(firebaseUid) / 施設タブレット=PIN(pinCode:bcryptハッシュ)
+model User {
+  id             String     @id @default(uuid()) @db.Uuid
+  corporationId  String     @map("corporation_id") @db.Uuid
+  facilityId     String     @map("facility_id") @db.Uuid
+  loginId        String     @unique @map("login_id")
+  firebaseUid    String?    @unique @map("firebase_uid")
+  lastName       String     @map("last_name")
+  firstName      String     @map("first_name")
+  kana           String?
+  pinCode        String     @map("pin_code")
+  certNumber     String?    @map("cert_number")
+  specialMealFee Int        @default(0) @map("special_meal_fee")
+  heightCm       Decimal?   @map("height_cm") @db.Decimal(5, 2)
+  status         UserStatus @default(active)
+  createdAt      DateTime   @default(now()) @map("created_at")
+  updatedAt      DateTime   @updatedAt @map("updated_at")
+
+  corporation Corporation @relation(fields: [corporationId], references: [id], onDelete: Restrict)
+  facility    Facility    @relation(fields: [facilityId], references: [id], onDelete: Restrict)
+
+  @@index([corporationId])
+  @@index([facilityId])
+  @@map("users")
+}
+
+// ---------- タブレット端末 ----------
+
+/// 施設に置く打刻用タブレット端末（端末認証に使用）
+model KioskDevice {
+  id          String       @id @default(uuid()) @db.Uuid
+  facilityId  String       @map("facility_id") @db.Uuid
+  deviceToken String       @unique @map("device_token")
+  label       String
+  status      EntityStatus @default(active)
+  lastUsedAt  DateTime?    @map("last_used_at")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+
+  facility Facility @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+
+  @@index([facilityId])
+  @@map("kiosk_devices")
+}
