@@ -1,0 +1,21 @@
+name: CI
+
+on:
+  push:
+    branches: [rebuild, main, master]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Prisma Client 生成
+        run: npx prisma generate
+      - name: ビルド
+        run: npm run build
