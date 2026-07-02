@@ -16,8 +16,9 @@ import { applicationDefault, getApps, initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { PrismaClient } from '@prisma/client';
 
-const EMAIL = 'admin@example.com';
-const PASSWORD = 'DevTest1234!';
+// 検証対象のアカウントは環境変数で切り替え可能（既定はシステム管理者）
+const EMAIL = process.env.VERIFY_EMAIL ?? 'admin@example.com';
+const PASSWORD = process.env.VERIFY_PASSWORD ?? 'DevTest1234!';
 const API_KEY = process.env.FIREBASE_WEB_API_KEY;
 
 async function main() {

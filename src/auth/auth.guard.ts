@@ -5,10 +5,12 @@ import {
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
 import { FirebaseService } from '../firebase/firebase.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { Principal } from './principal.types';
+import { IS_PUBLIC_KEY } from './public.decorator';
 
 /** principal を付与したリクエスト型 */
 export type AuthedRequest = Request & { principal?: Principal };
@@ -24,9 +26,17 @@ export class AuthGuard implements CanActivate {
   constructor(
     private readonly firebase: FirebaseService,
     private readonly prisma: PrismaService,
+    private readonly reflector: Reflector,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
+    // @Public() が付いたエンドポイントは認証をスキップ
+    const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    if (isPublic) return true;
+
     const req = context.switchToHttp().getRequest<AuthedRequest>();
 
     const authHeader = req.headers['authorization'];

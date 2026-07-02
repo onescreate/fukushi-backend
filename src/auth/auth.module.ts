@@ -1,9 +1,8 @@
 import { Module } from '@nestjs/common';
 import { AuthController } from './auth.controller';
-import { AuthGuard } from './auth.guard';
 
+// 認証・権限ガードは AppModule で全体適用（APP_GUARD）している。
 @Module({
   controllers: [AuthController],
-  providers: [AuthGuard],
 })
 export class AuthModule {}

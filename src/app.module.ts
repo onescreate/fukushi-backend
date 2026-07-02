@@ -1,8 +1,11 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { APP_GUARD } from '@nestjs/core';
 import { PrismaModule } from './prisma/prisma.module';
 import { FirebaseModule } from './firebase/firebase.module';
 import { AuthModule } from './auth/auth.module';
+import { AuthGuard } from './auth/auth.guard';
+import { RbacGuard } from './auth/rbac.guard';
 import { HealthModule } from './health/health.module';
 
 @Module({
@@ -13,6 +16,11 @@ import { HealthModule } from './health/health.module';
     FirebaseModule,
     AuthModule,
     HealthModule,
+  ],
+  providers: [
+    // 全エンドポイントに順に適用: ①認証 → ②権限
+    { provide: APP_GUARD, useClass: AuthGuard },
+    { provide: APP_GUARD, useClass: RbacGuard },
   ],
 })
 export class AppModule {}

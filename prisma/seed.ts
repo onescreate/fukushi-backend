@@ -16,6 +16,8 @@ const IDS = {
   systemAdmin: '00000000-0000-0000-0000-000000000003',
   systemAdminRole: '00000000-0000-0000-0000-000000000004',
   sampleUser: '00000000-0000-0000-0000-000000000005',
+  facilityStaff: '00000000-0000-0000-0000-000000000006',
+  facilityStaffRole: '00000000-0000-0000-0000-000000000007',
 };
 
 async function main() {
@@ -63,6 +65,29 @@ async function main() {
     },
   });
 
+  // 4b. 一般スタッフ（権限が狭い。RBACの拒否テスト用）
+  const staff = await prisma.staff.upsert({
+    where: { id: IDS.facilityStaff },
+    update: {},
+    create: {
+      id: IDS.facilityStaff,
+      corporationId: corporation.id,
+      lastName: 'スタッフ',
+      firstName: '次郎',
+      email: 'staff@example.com',
+    },
+  });
+  await prisma.staffFacilityRole.upsert({
+    where: { id: IDS.facilityStaffRole },
+    update: {},
+    create: {
+      id: IDS.facilityStaffRole,
+      staffId: staff.id,
+      facilityId: facility.id, // 特定店舗の一般スタッフ
+      role: 'staff',
+    },
+  });
+
   // 5. サンプル利用者（PIN=1234 をbcryptハッシュ化）
   const pinHash = await bcrypt.hash('1234', 10);
   await prisma.user.upsert({
@@ -84,6 +109,7 @@ async function main() {
   console.log(`  法人: ${corporation.name}`);
   console.log(`  店舗: ${facility.name}`);
   console.log(`  管理者: ${admin.email}（system_admin）`);
+  console.log(`  スタッフ: ${staff.email}（staff・店舗限定）`);
   console.log(`  利用者: user001 / PIN=1234`);
 }
 
