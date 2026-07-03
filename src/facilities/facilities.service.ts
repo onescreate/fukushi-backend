@@ -65,6 +65,7 @@ export class FacilitiesService {
         corporationId,
         name: dto.name,
         serviceType: dto.serviceType,
+        mealsEnabled: dto.mealsEnabled ?? false,
         email: dto.email,
         remarks: dto.remarks,
         status: dto.status ?? 'active',
@@ -84,6 +85,7 @@ export class FacilitiesService {
       data: {
         name: dto.name,
         serviceType: dto.serviceType,
+        mealsEnabled: dto.mealsEnabled,
         email: dto.email,
         remarks: dto.remarks,
         status: dto.status,

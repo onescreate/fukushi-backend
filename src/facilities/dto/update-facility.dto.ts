@@ -1,4 +1,11 @@
-import { IsIn, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import {
+  IsBoolean,
+  IsIn,
+  IsOptional,
+  IsString,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
 import { AddressContactDto } from '../../common/dto/address-contact.dto';
 
 const SERVICE_TYPES = [
@@ -18,6 +25,10 @@ export class UpdateFacilityDto extends AddressContactDto {
   @IsOptional()
   @IsIn(SERVICE_TYPES)
   serviceType?: (typeof SERVICE_TYPES)[number];
+
+  @IsOptional()
+  @IsBoolean()
+  mealsEnabled?: boolean;
 
   @IsOptional()
   @IsString()
