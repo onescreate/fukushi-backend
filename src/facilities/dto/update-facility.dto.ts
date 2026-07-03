@@ -1,9 +1,12 @@
 import {
   IsBoolean,
   IsIn,
+  IsInt,
   IsOptional,
   IsString,
+  Max,
   MaxLength,
+  Min,
   MinLength,
 } from 'class-validator';
 import { AddressContactDto } from '../../common/dto/address-contact.dto';
@@ -29,6 +32,12 @@ export class UpdateFacilityDto extends AddressContactDto {
   @IsOptional()
   @IsBoolean()
   mealsEnabled?: boolean;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(60)
+  mealChangeDeadlineDays?: number;
 
   @IsOptional()
   @IsString()
