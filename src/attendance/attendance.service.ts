@@ -10,6 +10,7 @@ import {
 } from '../auth/access-scope';
 import { Principal } from '../auth/principal.types';
 import { UpdateAttendanceSettingsDto } from './dto/attendance-settings.dto';
+import { ManualAttendanceDto } from './dto/manual-attendance.dto';
 
 const pad = (n: number) => String(n).padStart(2, '0');
 
@@ -84,6 +85,125 @@ export class AttendanceService {
       where: { userId_workDate: { userId, workDate } },
     });
     return { clockedIn: !!att?.clockIn, clockedOut: !!att?.clockOut };
+  }
+
+  /** 当日ロースター（店舗×日付の利用者一覧＋予定＋打刻状況） */
+  async roster(principal: Principal, facilityId: string, date: string) {
+    const scope = computeAccessScope(principal);
+    const facility = await this.prisma.facility
+      .findUnique({ where: { id: facilityId } })
+      .catch(() => null);
+    if (!facility) throw new BadRequestException('店舗が存在しません');
+    if (!canAccessFacility(scope, facility)) {
+      throw new ForbiddenException('この店舗を閲覧する権限がありません');
+    }
+
+    const workDate = new Date(date);
+    const todayStr = dateStr(jstNow());
+
+    const schedules = await this.prisma.schedule.findMany({
+      where: { facilityId, planDate: workDate },
+      include: { user: { select: { lastName: true, firstName: true } } },
+    });
+    const attendances = await this.prisma.attendance.findMany({
+      where: { facilityId, workDate },
+    });
+
+    const schByUser = new Map(schedules.map((s) => [s.userId, s]));
+    const attByUser = new Map(attendances.map((a) => [a.userId, a]));
+    const userIds = [
+      ...new Set([...schByUser.keys(), ...attByUser.keys()]),
+    ];
+
+    // 予定にも打刻にも無い利用者（属性用に名前を引く）
+    const missingNames = userIds.filter((id) => !schByUser.has(id));
+    const extraUsers = missingNames.length
+      ? await this.prisma.user.findMany({
+          where: { id: { in: missingNames } },
+          select: { id: true, lastName: true, firstName: true },
+        })
+      : [];
+    const nameMap = new Map(extraUsers.map((u) => [u.id, u]));
+
+    const rows = userIds.map((userId) => {
+      const s = schByUser.get(userId);
+      const a = attByUser.get(userId);
+      const u = s?.user ?? nameMap.get(userId);
+      let status: 'present' | 'absent' | 'notyet';
+      if (a?.clockIn) status = 'present';
+      else if (a?.status === 'absent') status = 'absent';
+      else status = date < todayStr ? 'absent' : 'notyet';
+      return {
+        userId,
+        name: u ? `${u.lastName} ${u.firstName}` : '—',
+        planIn: s?.planIn ?? null,
+        planOut: s?.planOut ?? null,
+        scheduleStatus: s?.status ?? null,
+        clockIn: a?.clockIn ? toHHMM(jstNow(a.clockIn)) : null,
+        clockOut: a?.clockOut ? toHHMM(jstNow(a.clockOut)) : null,
+        status,
+        isLate: a?.isLate ?? false,
+        isEarlyLeave: a?.isEarlyLeave ?? false,
+        absenceReason: a?.absenceReason ?? null,
+        lateReason: a?.lateReason ?? null,
+        earlyLeaveReason: a?.earlyLeaveReason ?? null,
+      };
+    });
+    rows.sort((x, y) => x.name.localeCompare(y.name, 'ja'));
+    return rows;
+  }
+
+  /** 管理側の手動補正（打刻時刻・欠席・理由） */
+  async manualUpdate(principal: Principal, dto: ManualAttendanceDto) {
+    const scope = computeAccessScope(principal);
+    const user = await this.prisma.user
+      .findUnique({
+        where: { id: dto.userId },
+        select: { corporationId: true, facilityId: true },
+      })
+      .catch(() => null);
+    if (!user) throw new BadRequestException('利用者が見つかりません');
+    if (
+      !canAccessFacility(scope, {
+        id: user.facilityId,
+        corporationId: user.corporationId,
+      })
+    ) {
+      throw new ForbiddenException('この利用者を操作する権限がありません');
+    }
+
+    const workDate = new Date(dto.date);
+    const toInstant = (hhmm?: string) =>
+      hhmm ? new Date(`${dto.date}T${hhmm}:00+09:00`) : undefined;
+
+    const data = {
+      status: dto.status,
+      clockIn: toInstant(dto.clockIn),
+      clockOut: toInstant(dto.clockOut),
+      absenceReason: dto.absenceReason,
+      lateReason: dto.lateReason,
+      earlyLeaveReason: dto.earlyLeaveReason,
+      updatedBy: principal.id,
+    };
+
+    await this.prisma.attendance.upsert({
+      where: { userId_workDate: { userId: dto.userId, workDate } },
+      create: {
+        corporationId: user.corporationId,
+        facilityId: user.facilityId,
+        userId: dto.userId,
+        workDate,
+        status: dto.status ?? 'present',
+        clockIn: toInstant(dto.clockIn),
+        clockOut: toInstant(dto.clockOut),
+        absenceReason: dto.absenceReason,
+        lateReason: dto.lateReason,
+        earlyLeaveReason: dto.earlyLeaveReason,
+        createdBy: principal.id,
+      },
+      update: data,
+    });
+    return { ok: true };
   }
 
   /** 打刻画面に出す「今日の予定・中抜け」情報 */
