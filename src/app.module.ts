@@ -9,6 +9,7 @@ import { RbacGuard } from './auth/rbac.guard';
 import { CorporationsModule } from './corporations/corporations.module';
 import { FacilitiesModule } from './facilities/facilities.module';
 import { StaffModule } from './staff/staff.module';
+import { UsersModule } from './users/users.module';
 import { PostalModule } from './postal/postal.module';
 import { HealthModule } from './health/health.module';
 
@@ -22,6 +23,7 @@ import { HealthModule } from './health/health.module';
     CorporationsModule,
     FacilitiesModule,
     StaffModule,
+    UsersModule,
     PostalModule,
     HealthModule,
   ],
