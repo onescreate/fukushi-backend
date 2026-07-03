@@ -59,9 +59,10 @@ model Corporation {
   createdAt     DateTime     @default(now()) @map("created_at")
   updatedAt     DateTime     @updatedAt @map("updated_at")
 
-  facilities Facility[]
-  staff      Staff[]
-  users      User[]
+  facilities  Facility[]
+  staff       Staff[]
+  users       User[]
+  taxSettings TaxSetting[]
 
   @@map("corporations")
 }
@@ -90,6 +91,7 @@ model Facility {
   staffRoles        StaffFacilityRole[]
   kioskDevices      KioskDevice[]
   attendanceSetting AttendanceSetting?
+  mealPricings      MealPricing[]
 
   @@index([corporationId])
   @@map("facilities")
@@ -147,6 +149,7 @@ model User {
   kana           String?
   pinCode        String     @map("pin_code")
   certNumber     String?    @map("cert_number")
+  useSpecialMealFee Boolean @default(false) @map("use_special_meal_fee") // true=特別料金(special_meal_fee)を適用 / false=店舗の食事料金
   specialMealFee Int        @default(0) @map("special_meal_fee")
   heightCm       Decimal?   @map("height_cm") @db.Decimal(5, 2)
   status         UserStatus @default(active)
@@ -300,6 +303,19 @@ enum MealStatus {
   eaten // 喫食済
 }
 
+/// 消費税の区分（品目別に標準/軽減を持てる）
+enum TaxCategory {
+  standard // 標準税率
+  reduced // 軽減税率
+}
+
+/// 消費税の端数処理
+enum TaxRounding {
+  floor // 切り捨て
+  round // 四捨五入
+  ceil // 切り上げ
+}
+
 /// 食事予約（利用者×日付で1件）
 model Meal {
   id            String     @id @default(uuid()) @db.Uuid
@@ -320,4 +336,45 @@ model Meal {
   @@unique([userId, mealDate])
   @@index([facilityId, mealDate])
   @@map("meals")
+}
+
+/// 食事料金（店舗ごと・適用開始日つきの履歴型）
+model MealPricing {
+  id            String   @id @default(uuid()) @db.Uuid
+  corporationId String   @map("corporation_id") @db.Uuid
+  facilityId    String   @map("facility_id") @db.Uuid
+  effectiveDate DateTime @map("effective_date") @db.Date // この日以降に適用
+  mealFee       Int      @default(0) @map("meal_fee") // 食事料金（内税・円）
+  cancelFee     Int      @default(0) @map("cancel_fee") // キャンセル料（内税・円）
+  createdBy     String?  @map("created_by") @db.Uuid
+  updatedBy     String?  @map("updated_by") @db.Uuid
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  facility Facility @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+
+  @@unique([facilityId, effectiveDate])
+  @@index([facilityId, effectiveDate])
+  @@map("meal_pricings")
+}
+
+/// 消費税設定（法人ごと・区分別・適用開始日つきの履歴型）
+model TaxSetting {
+  id               String      @id @default(uuid()) @db.Uuid
+  corporationId    String      @map("corporation_id") @db.Uuid
+  effectiveDate    DateTime    @map("effective_date") @db.Date // この日以降に適用
+  category         TaxCategory @default(reduced) // 食事は既定で軽減税率
+  rate             Int         @default(8) // 税率（％）
+  priceIncludesTax Boolean     @default(true) @map("price_includes_tax") // 内税/外税（既定=内税）
+  rounding         TaxRounding @default(floor) // 端数処理（既定=切り捨て）
+  createdBy        String?     @map("created_by") @db.Uuid
+  updatedBy        String?     @map("updated_by") @db.Uuid
+  createdAt        DateTime    @default(now()) @map("created_at")
+  updatedAt        DateTime    @updatedAt @map("updated_at")
+
+  corporation Corporation @relation(fields: [corporationId], references: [id], onDelete: Cascade)
+
+  @@unique([corporationId, category, effectiveDate])
+  @@index([corporationId, effectiveDate])
+  @@map("tax_settings")
 }
