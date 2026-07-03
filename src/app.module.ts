@@ -12,6 +12,7 @@ import { StaffModule } from './staff/staff.module';
 import { UsersModule } from './users/users.module';
 import { SchedulesModule } from './schedules/schedules.module';
 import { AttendanceModule } from './attendance/attendance.module';
+import { MealsModule } from './meals/meals.module';
 import { KioskModule } from './kiosk/kiosk.module';
 import { PostalModule } from './postal/postal.module';
 import { HealthModule } from './health/health.module';
@@ -29,6 +30,7 @@ import { HealthModule } from './health/health.module';
     UsersModule,
     SchedulesModule,
     AttendanceModule,
+    MealsModule,
     KioskModule,
     PostalModule,
     HealthModule,
