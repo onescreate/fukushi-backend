@@ -3,10 +3,18 @@ import { MealPricingController } from './meal-pricing.controller';
 import { MealPricingService } from './meal-pricing.service';
 import { TaxSettingController } from './tax-setting.controller';
 import { TaxSettingService } from './tax-setting.service';
+import { MealReservationController } from './meal-reservation.controller';
+import { MyMealsController } from './my-meals.controller';
+import { MealReservationService } from './meal-reservation.service';
 
 @Module({
-  controllers: [MealPricingController, TaxSettingController],
-  providers: [MealPricingService, TaxSettingService],
-  exports: [MealPricingService, TaxSettingService],
+  controllers: [
+    MealPricingController,
+    TaxSettingController,
+    MealReservationController,
+    MyMealsController,
+  ],
+  providers: [MealPricingService, TaxSettingService, MealReservationService],
+  exports: [MealPricingService, TaxSettingService, MealReservationService],
 })
 export class MealsModule {}

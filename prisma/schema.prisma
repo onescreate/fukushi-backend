@@ -74,6 +74,7 @@ model Facility {
   name          String
   serviceType   ServiceType? @map("service_type")
   mealsEnabled  Boolean      @default(false) @map("meals_enabled")
+  mealChangeDeadlineDays Int  @default(14) @map("meal_change_deadline_days") // 利用日までこの日数以内は「申請」扱い＋キャンセル料対象
   email         String?
   status        EntityStatus @default(active)
   remarks       String?
@@ -303,6 +304,19 @@ enum MealStatus {
   eaten // 喫食済
 }
 
+/// 食事予約の承認状態（利用者本人の申請時に使用。管理側操作は常に approved）
+enum MealApprovalStatus {
+  pending // 承認待ち
+  approved // 承認済み（即確定含む）
+  rejected // 却下
+}
+
+/// 承認待ちの申請種別（予約 or キャンセル）
+enum MealRequestType {
+  reserve // 予約の申請
+  cancel // キャンセルの申請
+}
+
 /// 消費税の区分（品目別に標準/軽減を持てる）
 enum TaxCategory {
   standard // 標準税率
@@ -324,10 +338,14 @@ model Meal {
   userId        String     @map("user_id") @db.Uuid
   mealDate      DateTime   @map("meal_date") @db.Date
   status        MealStatus @default(reserved)
-  amount        Int        @default(0)
+  amount        Int        @default(0) // 予約時にスナップショットした料金（税込）
   situation     String?
+  approvalStatus MealApprovalStatus @default(approved) @map("approval_status")
+  requestType   MealRequestType?    @map("request_type") // 承認待ちのとき、予約 or キャンセルのどちらの申請か
   createdBy     String?    @map("created_by") @db.Uuid
   updatedBy     String?    @map("updated_by") @db.Uuid
+  approvedBy    String?    @map("approved_by") @db.Uuid
+  approvedAt    DateTime?  @map("approved_at")
   createdAt     DateTime   @default(now()) @map("created_at")
   updatedAt     DateTime   @updatedAt @map("updated_at")
 
@@ -335,6 +353,7 @@ model Meal {
 
   @@unique([userId, mealDate])
   @@index([facilityId, mealDate])
+  @@index([facilityId, approvalStatus])
   @@map("meals")
 }
 
