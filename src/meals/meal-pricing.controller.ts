@@ -13,8 +13,8 @@ import { RequirePermission } from '../auth/require-permission.decorator';
 import { UpsertMealPricingDto } from './dto/meal-pricing.dto';
 import { MealPricingService } from './meal-pricing.service';
 
-// 食事料金マスタ（店舗ごと・履歴型）
-@RequirePermission('meal.view')
+// 食事料金マスタ（店舗ごと・履歴型）。権限は settings.price（権限モジュールで管理）。
+@RequirePermission('settings.price')
 @Controller('meal-pricings')
 export class MealPricingController {
   constructor(private readonly service: MealPricingService) {}
@@ -27,7 +27,6 @@ export class MealPricingController {
     return this.service.list(principal, facilityId);
   }
 
-  @RequirePermission('meal.manage')
   @Post(':facilityId')
   create(
     @CurrentUser() principal: Principal,
@@ -37,7 +36,6 @@ export class MealPricingController {
     return this.service.create(principal, facilityId, dto);
   }
 
-  @RequirePermission('meal.manage')
   @Put(':facilityId/:id')
   update(
     @CurrentUser() principal: Principal,
@@ -48,7 +46,6 @@ export class MealPricingController {
     return this.service.update(principal, facilityId, id, dto);
   }
 
-  @RequirePermission('meal.manage')
   @Delete(':facilityId/:id')
   remove(
     @CurrentUser() principal: Principal,
