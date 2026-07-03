@@ -2,7 +2,6 @@ import { Controller, Get } from '@nestjs/common';
 import { CurrentUser } from './current-user.decorator';
 import { getPermissionsForPrincipal } from './permissions';
 import { Principal } from './principal.types';
-import { RequirePermission } from './require-permission.decorator';
 
 @Controller()
 export class AuthController {
@@ -15,21 +14,6 @@ export class AuthController {
     return {
       ...principal,
       permissions: [...getPermissionsForPrincipal(principal)],
-    };
-  }
-
-  /**
-   * GET /debug/rbac — 権限ガードの動作確認用（Step 1-0）。
-   * corporation.manage 権限（＝実質 system_admin）が必要。
-   * ※ 検証が済んだら削除予定。
-   */
-  @RequirePermission('corporation.manage')
-  @Get('debug/rbac')
-  rbacCheck(@CurrentUser() principal: Principal) {
-    return {
-      ok: true,
-      message: 'corporation.manage 権限が確認できました',
-      who: principal.name,
     };
   }
 }

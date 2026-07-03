@@ -6,6 +6,7 @@ import { FirebaseModule } from './firebase/firebase.module';
 import { AuthModule } from './auth/auth.module';
 import { AuthGuard } from './auth/auth.guard';
 import { RbacGuard } from './auth/rbac.guard';
+import { CorporationsModule } from './corporations/corporations.module';
 import { HealthModule } from './health/health.module';
 
 @Module({
@@ -15,6 +16,7 @@ import { HealthModule } from './health/health.module';
     PrismaModule,
     FirebaseModule,
     AuthModule,
+    CorporationsModule,
     HealthModule,
   ],
   providers: [
