@@ -1,4 +1,5 @@
 import {
+  IsBoolean,
   IsIn,
   IsInt,
   IsNumber,
@@ -47,6 +48,10 @@ export class CreateUserDto {
   @IsString()
   @MaxLength(50)
   certNumber?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  useSpecialMealFee?: boolean;
 
   @IsOptional()
   @IsInt()
