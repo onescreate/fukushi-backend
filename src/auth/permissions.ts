@@ -45,7 +45,6 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   ),
 
   facility_admin: [
-    'store.manage',
     'staff.manage',
     'user.view',
     'user.manage',

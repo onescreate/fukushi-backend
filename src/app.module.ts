@@ -7,6 +7,8 @@ import { AuthModule } from './auth/auth.module';
 import { AuthGuard } from './auth/auth.guard';
 import { RbacGuard } from './auth/rbac.guard';
 import { CorporationsModule } from './corporations/corporations.module';
+import { FacilitiesModule } from './facilities/facilities.module';
+import { PostalModule } from './postal/postal.module';
 import { HealthModule } from './health/health.module';
 
 @Module({
@@ -17,6 +19,8 @@ import { HealthModule } from './health/health.module';
     FirebaseModule,
     AuthModule,
     CorporationsModule,
+    FacilitiesModule,
+    PostalModule,
     HealthModule,
   ],
   providers: [

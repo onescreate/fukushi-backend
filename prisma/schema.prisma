@@ -47,11 +47,17 @@ enum UserStatus {
 
 /// 法人（テナント最上位）
 model Corporation {
-  id        String       @id @default(uuid()) @db.Uuid
-  name      String
-  status    EntityStatus @default(active)
-  createdAt DateTime     @default(now()) @map("created_at")
-  updatedAt DateTime     @updatedAt @map("updated_at")
+  id            String       @id @default(uuid()) @db.Uuid
+  name          String
+  status        EntityStatus @default(active)
+  establishedOn DateTime?    @map("established_on") @db.Date
+  postalCode    String?      @map("postal_code")
+  prefecture    String?
+  city          String?
+  addressLine   String?      @map("address_line")
+  phone         String?
+  createdAt     DateTime     @default(now()) @map("created_at")
+  updatedAt     DateTime     @updatedAt @map("updated_at")
 
   facilities Facility[]
   staff      Staff[]
@@ -69,6 +75,12 @@ model Facility {
   email         String?
   status        EntityStatus @default(active)
   remarks       String?
+  establishedOn DateTime?    @map("established_on") @db.Date
+  postalCode    String?      @map("postal_code")
+  prefecture    String?
+  city          String?
+  addressLine   String?      @map("address_line")
+  phone         String?
   createdAt     DateTime     @default(now()) @map("created_at")
   updatedAt     DateTime     @updatedAt @map("updated_at")
 

@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { mapAddressContact } from '../common/dto/address-contact.mapper';
 import { CreateCorporationDto } from './dto/create-corporation.dto';
 import { UpdateCorporationDto } from './dto/update-corporation.dto';
 
@@ -28,7 +29,11 @@ export class CorporationsService {
 
   create(dto: CreateCorporationDto) {
     return this.prisma.corporation.create({
-      data: { name: dto.name, status: dto.status ?? 'active' },
+      data: {
+        name: dto.name,
+        status: dto.status ?? 'active',
+        ...mapAddressContact(dto),
+      },
     });
   }
 
@@ -36,7 +41,7 @@ export class CorporationsService {
     await this.get(id);
     return this.prisma.corporation.update({
       where: { id },
-      data: { name: dto.name, status: dto.status },
+      data: { name: dto.name, status: dto.status, ...mapAddressContact(dto) },
     });
   }
 
