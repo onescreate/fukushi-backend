@@ -10,6 +10,7 @@ import { CorporationsModule } from './corporations/corporations.module';
 import { FacilitiesModule } from './facilities/facilities.module';
 import { StaffModule } from './staff/staff.module';
 import { UsersModule } from './users/users.module';
+import { SchedulesModule } from './schedules/schedules.module';
 import { KioskModule } from './kiosk/kiosk.module';
 import { PostalModule } from './postal/postal.module';
 import { HealthModule } from './health/health.module';
@@ -25,6 +26,7 @@ import { HealthModule } from './health/health.module';
     FacilitiesModule,
     StaffModule,
     UsersModule,
+    SchedulesModule,
     KioskModule,
     PostalModule,
     HealthModule,
