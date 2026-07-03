@@ -10,6 +10,7 @@ import { createHash, randomBytes } from 'crypto';
 import * as bcrypt from 'bcryptjs';
 import * as jwt from 'jsonwebtoken';
 import { PrismaService } from '../prisma/prisma.service';
+import { AttendanceService } from '../attendance/attendance.service';
 import {
   AccessScope,
   canAccessFacility,
@@ -27,7 +28,10 @@ function hashToken(raw: string): string {
 
 @Injectable()
 export class KioskService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly attendance: AttendanceService,
+  ) {}
 
   // PIN試行回数の簡易制限（利用者ID単位・メモリ内）
   private attempts = new Map<string, { count: number; until: number }>();
@@ -165,10 +169,55 @@ export class KioskService {
       { expiresIn: '5m' },
     );
 
+    const todayStatus = await this.attendance.getTodayStatus(user.id);
     return {
       operationToken,
       user: { id: user.id, name: `${user.lastName} ${user.firstName}` },
+      attendance: todayStatus,
     };
+  }
+
+  /** 操作トークンを検証して利用者IDを取り出す */
+  private verifyOperationToken(token: string): string {
+    try {
+      const payload = jwt.verify(
+        token,
+        process.env.KIOSK_TOKEN_SECRET ?? '',
+      ) as jwt.JwtPayload;
+      if (payload.scope !== 'kiosk' || typeof payload.sub !== 'string') {
+        throw new Error('invalid');
+      }
+      return payload.sub;
+    } catch {
+      throw new UnauthorizedException('操作トークンが無効か、期限が切れています');
+    }
+  }
+
+  /** 通所/退所の打刻（PIN認証で得た操作トークンが必要） */
+  async clock(operationToken: string, type: 'in' | 'out') {
+    const userId = this.verifyOperationToken(operationToken);
+    return this.attendance.recordClock(userId, type);
+  }
+
+  /** 打刻画面に出す情報（今日の予定・中抜け・アラート） */
+  async board(operationToken: string) {
+    const userId = this.verifyOperationToken(operationToken);
+    const [today, alerts] = await Promise.all([
+      this.attendance.getTodayInfo(userId),
+      this.attendance.getAlerts(userId),
+    ]);
+    return { today, alerts };
+  }
+
+  /** 欠席・遅刻・早退の理由入力 */
+  async submitReason(
+    operationToken: string,
+    date: string,
+    kind: 'absence' | 'late' | 'early',
+    reason: string,
+  ) {
+    const userId = this.verifyOperationToken(operationToken);
+    return this.attendance.submitReason(userId, date, kind, reason);
   }
 
   private recordFailure(userId: string) {

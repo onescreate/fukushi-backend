@@ -84,10 +84,11 @@ model Facility {
   createdAt     DateTime     @default(now()) @map("created_at")
   updatedAt     DateTime     @updatedAt @map("updated_at")
 
-  corporation  Corporation         @relation(fields: [corporationId], references: [id], onDelete: Restrict)
-  users        User[]
-  staffRoles   StaffFacilityRole[]
-  kioskDevices KioskDevice[]
+  corporation       Corporation         @relation(fields: [corporationId], references: [id], onDelete: Restrict)
+  users             User[]
+  staffRoles        StaffFacilityRole[]
+  kioskDevices      KioskDevice[]
+  attendanceSetting AttendanceSetting?
 
   @@index([corporationId])
   @@map("facilities")
@@ -255,10 +256,12 @@ model Attendance {
   workDate      DateTime         @map("work_date") @db.Date
   clockIn       DateTime?        @map("clock_in")
   clockOut      DateTime?        @map("clock_out")
-  status        AttendanceStatus @default(present)
-  isLate        Boolean          @default(false) @map("is_late")
-  isEarlyLeave  Boolean          @default(false) @map("is_early_leave")
-  absenceReason String?          @map("absence_reason")
+  status          AttendanceStatus @default(present)
+  isLate          Boolean          @default(false) @map("is_late")
+  isEarlyLeave    Boolean          @default(false) @map("is_early_leave")
+  absenceReason   String?          @map("absence_reason")
+  lateReason      String?          @map("late_reason")
+  earlyLeaveReason String?         @map("early_leave_reason")
   createdBy     String?          @map("created_by") @db.Uuid
   updatedBy     String?          @map("updated_by") @db.Uuid
   createdAt     DateTime         @default(now()) @map("created_at")
@@ -269,4 +272,18 @@ model Attendance {
   @@unique([userId, workDate])
   @@index([facilityId, workDate])
   @@map("attendances")
+}
+
+/// 打刻の判定設定（店舗ごと・遅刻/早退の猶予分）
+model AttendanceSetting {
+  id                     String   @id @default(uuid()) @db.Uuid
+  facilityId             String   @unique @map("facility_id") @db.Uuid
+  lateGraceMinutes       Int      @default(0) @map("late_grace_minutes")
+  earlyLeaveGraceMinutes Int      @default(0) @map("early_leave_grace_minutes")
+  createdAt              DateTime @default(now()) @map("created_at")
+  updatedAt              DateTime @updatedAt @map("updated_at")
+
+  facility Facility @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+
+  @@map("attendance_settings")
 }

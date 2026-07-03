@@ -1,6 +1,12 @@
 import { Body, Controller, Post } from '@nestjs/common';
 import { Public } from '../auth/public.decorator';
-import { KioskAuthDto, KioskUsersDto } from './dto/kiosk-auth.dto';
+import {
+  KioskAuthDto,
+  KioskBoardDto,
+  KioskClockDto,
+  KioskReasonDto,
+  KioskUsersDto,
+} from './dto/kiosk-auth.dto';
 import { KioskService } from './kiosk.service';
 
 // タブレット（キオスク）用。Firebase認証は不要で、端末トークンで守る。
@@ -19,5 +25,28 @@ export class KioskController {
   @Post('authenticate')
   authenticate(@Body() dto: KioskAuthDto) {
     return this.service.authenticate(dto.deviceToken, dto.userId, dto.pin);
+  }
+
+  /** 通所/退所の打刻（操作トークンが必要） */
+  @Post('clock')
+  clock(@Body() dto: KioskClockDto) {
+    return this.service.clock(dto.operationToken, dto.type);
+  }
+
+  /** 打刻画面の情報（今日の予定・中抜け・アラート） */
+  @Post('board')
+  board(@Body() dto: KioskBoardDto) {
+    return this.service.board(dto.operationToken);
+  }
+
+  /** 欠席・遅刻・早退の理由入力 */
+  @Post('reason')
+  reason(@Body() dto: KioskReasonDto) {
+    return this.service.submitReason(
+      dto.operationToken,
+      dto.date,
+      dto.kind,
+      dto.reason,
+    );
   }
 }

@@ -11,6 +11,7 @@ import { FacilitiesModule } from './facilities/facilities.module';
 import { StaffModule } from './staff/staff.module';
 import { UsersModule } from './users/users.module';
 import { SchedulesModule } from './schedules/schedules.module';
+import { AttendanceModule } from './attendance/attendance.module';
 import { KioskModule } from './kiosk/kiosk.module';
 import { PostalModule } from './postal/postal.module';
 import { HealthModule } from './health/health.module';
@@ -27,6 +28,7 @@ import { HealthModule } from './health/health.module';
     StaffModule,
     UsersModule,
     SchedulesModule,
+    AttendanceModule,
     KioskModule,
     PostalModule,
     HealthModule,
