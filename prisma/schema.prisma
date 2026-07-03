@@ -151,8 +151,10 @@ model User {
   createdAt      DateTime   @default(now()) @map("created_at")
   updatedAt      DateTime   @updatedAt @map("updated_at")
 
-  corporation Corporation @relation(fields: [corporationId], references: [id], onDelete: Restrict)
-  facility    Facility    @relation(fields: [facilityId], references: [id], onDelete: Restrict)
+  corporation Corporation  @relation(fields: [corporationId], references: [id], onDelete: Restrict)
+  facility    Facility     @relation(fields: [facilityId], references: [id], onDelete: Restrict)
+  schedules   Schedule[]
+  attendances Attendance[]
 
   @@index([corporationId])
   @@index([facilityId])
@@ -176,4 +178,95 @@ model KioskDevice {
 
   @@index([facilityId])
   @@map("kiosk_devices")
+}
+
+// ---------- 通所予定・打刻（Phase 2） ----------
+
+/// 予定の状態
+enum ScheduleStatus {
+  pending // 承認待ち
+  approved // 承認済
+  rejected // 却下
+}
+
+/// 予定に付随するイベント種別（中抜け等）
+enum ScheduleEventType {
+  break_out // 中抜け
+  practice // 実習
+  other
+}
+
+/// 打刻実績の状態
+enum AttendanceStatus {
+  present // 出席
+  absent // 欠席
+}
+
+/// 通所予定（利用者×日付で1件）
+model Schedule {
+  id            String         @id @default(uuid()) @db.Uuid
+  corporationId String         @map("corporation_id") @db.Uuid
+  facilityId    String         @map("facility_id") @db.Uuid
+  userId        String         @map("user_id") @db.Uuid
+  planDate      DateTime       @map("plan_date") @db.Date
+  planIn        String?        @map("plan_in") // "HH:MM"
+  planOut       String?        @map("plan_out") // "HH:MM"
+  status        ScheduleStatus @default(approved)
+  note          String?
+  createdBy     String?        @map("created_by") @db.Uuid
+  approvedBy    String?        @map("approved_by") @db.Uuid
+  approvedAt    DateTime?      @map("approved_at")
+  createdAt     DateTime       @default(now()) @map("created_at")
+  updatedAt     DateTime       @updatedAt @map("updated_at")
+
+  user    User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  details ScheduleDetail[]
+
+  @@unique([userId, planDate])
+  @@index([facilityId, planDate])
+  @@map("schedules")
+}
+
+/// 中抜け等（外出・戻りの予定/実績）
+model ScheduleDetail {
+  id         String            @id @default(uuid()) @db.Uuid
+  scheduleId String            @map("schedule_id") @db.Uuid
+  eventType  ScheduleEventType @map("event_type")
+  plannedOut String?           @map("planned_out") // "HH:MM"
+  plannedIn  String?           @map("planned_in") // "HH:MM"
+  actualOut  String?           @map("actual_out")
+  actualIn   String?           @map("actual_in")
+  note       String?
+  createdAt  DateTime          @default(now()) @map("created_at")
+  updatedAt  DateTime          @updatedAt @map("updated_at")
+
+  schedule Schedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+
+  @@index([scheduleId])
+  @@map("schedule_details")
+}
+
+/// 打刻実績（利用者×日付で1件）
+model Attendance {
+  id            String           @id @default(uuid()) @db.Uuid
+  corporationId String           @map("corporation_id") @db.Uuid
+  facilityId    String           @map("facility_id") @db.Uuid
+  userId        String           @map("user_id") @db.Uuid
+  workDate      DateTime         @map("work_date") @db.Date
+  clockIn       DateTime?        @map("clock_in")
+  clockOut      DateTime?        @map("clock_out")
+  status        AttendanceStatus @default(present)
+  isLate        Boolean          @default(false) @map("is_late")
+  isEarlyLeave  Boolean          @default(false) @map("is_early_leave")
+  absenceReason String?          @map("absence_reason")
+  createdBy     String?          @map("created_by") @db.Uuid
+  updatedBy     String?          @map("updated_by") @db.Uuid
+  createdAt     DateTime         @default(now()) @map("created_at")
+  updatedAt     DateTime         @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, workDate])
+  @@index([facilityId, workDate])
+  @@map("attendances")
 }
