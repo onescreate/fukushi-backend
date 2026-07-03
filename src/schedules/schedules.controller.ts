@@ -14,6 +14,7 @@ import { RequirePermission } from '../auth/require-permission.decorator';
 import { CreateScheduleDto } from './dto/create-schedule.dto';
 import { UpdateScheduleDto } from './dto/update-schedule.dto';
 import { BulkScheduleDto } from './dto/bulk-schedule.dto';
+import { CreateScheduleDetailDto } from './dto/create-detail.dto';
 import { SchedulesService } from './schedules.service';
 
 @RequirePermission('schedule.view')
@@ -81,5 +82,25 @@ export class SchedulesController {
   @Delete(':id')
   remove(@CurrentUser() principal: Principal, @Param('id') id: string) {
     return this.service.remove(principal, id);
+  }
+
+  // 中抜け等（明細）
+  @RequirePermission('schedule.submit')
+  @Post(':id/details')
+  addDetail(
+    @CurrentUser() principal: Principal,
+    @Param('id') id: string,
+    @Body() dto: CreateScheduleDetailDto,
+  ) {
+    return this.service.addDetail(principal, id, dto);
+  }
+
+  @RequirePermission('schedule.submit')
+  @Delete('details/:detailId')
+  removeDetail(
+    @CurrentUser() principal: Principal,
+    @Param('detailId') detailId: string,
+  ) {
+    return this.service.removeDetail(principal, detailId);
   }
 }

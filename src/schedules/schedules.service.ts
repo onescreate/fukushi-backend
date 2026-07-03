@@ -15,6 +15,7 @@ import { Principal } from '../auth/principal.types';
 import { CreateScheduleDto } from './dto/create-schedule.dto';
 import { UpdateScheduleDto } from './dto/update-schedule.dto';
 import { BulkScheduleDto } from './dto/bulk-schedule.dto';
+import { CreateScheduleDetailDto } from './dto/create-detail.dto';
 import { MySubmitScheduleDto } from './dto/my-submit-schedule.dto';
 import { computeAutoApproveStatus } from './schedule-rules';
 
@@ -127,6 +128,42 @@ export class SchedulesService {
       skipDuplicates: true,
     });
     return { created: res.count, skipped: dto.dates.length - res.count };
+  }
+
+  // ---------- 中抜け等（明細） ----------
+
+  async addDetail(
+    principal: Principal,
+    scheduleId: string,
+    dto: CreateScheduleDetailDto,
+  ) {
+    const scope = computeAccessScope(principal);
+    const schedule = await this.prisma.schedule.findUnique({
+      where: { id: scheduleId },
+    });
+    if (!schedule) throw new NotFoundException('予定が見つかりません');
+    await this.userInScope(scope, schedule.userId);
+    return this.prisma.scheduleDetail.create({
+      data: {
+        scheduleId,
+        eventType: dto.eventType ?? 'break_out',
+        plannedOut: dto.plannedOut,
+        plannedIn: dto.plannedIn,
+        note: dto.note,
+      },
+    });
+  }
+
+  async removeDetail(principal: Principal, detailId: string) {
+    const scope = computeAccessScope(principal);
+    const detail = await this.prisma.scheduleDetail.findUnique({
+      where: { id: detailId },
+      include: { schedule: true },
+    });
+    if (!detail) throw new NotFoundException('中抜けが見つかりません');
+    await this.userInScope(scope, detail.schedule.userId);
+    await this.prisma.scheduleDetail.delete({ where: { id: detailId } });
+    return { ok: true };
   }
 
   // ---------- 承認（管理側） ----------

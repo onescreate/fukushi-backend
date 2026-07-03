@@ -103,7 +103,10 @@ export class AttendanceService {
 
     const schedules = await this.prisma.schedule.findMany({
       where: { facilityId, planDate: workDate },
-      include: { user: { select: { lastName: true, firstName: true } } },
+      include: {
+        user: { select: { lastName: true, firstName: true } },
+        details: true,
+      },
     });
     const attendances = await this.prisma.attendance.findMany({
       where: { facilityId, workDate },
@@ -139,6 +142,13 @@ export class AttendanceService {
         planIn: s?.planIn ?? null,
         planOut: s?.planOut ?? null,
         scheduleStatus: s?.status ?? null,
+        breaks: (s?.details ?? [])
+          .filter((d) => d.eventType === 'break_out')
+          .map((d) => ({
+            plannedOut: d.plannedOut,
+            plannedIn: d.plannedIn,
+            note: d.note,
+          })),
         clockIn: a?.clockIn ? toHHMM(jstNow(a.clockIn)) : null,
         clockOut: a?.clockOut ? toHHMM(jstNow(a.clockOut)) : null,
         status,
