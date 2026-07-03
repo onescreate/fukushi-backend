@@ -78,6 +78,28 @@ export class AttendanceService {
     return this.getSettings(facilityId);
   }
 
+  /** 利用者本人の実績履歴（期間） */
+  async myHistory(userId: string, from: string, to: string) {
+    const rows = await this.prisma.attendance.findMany({
+      where: {
+        userId,
+        workDate: { gte: new Date(from), lte: new Date(to) },
+      },
+      orderBy: { workDate: 'desc' },
+    });
+    return rows.map((a) => ({
+      date: dateStr(a.workDate),
+      status: a.status,
+      clockIn: a.clockIn ? toHHMM(jstNow(a.clockIn)) : null,
+      clockOut: a.clockOut ? toHHMM(jstNow(a.clockOut)) : null,
+      isLate: a.isLate,
+      isEarlyLeave: a.isEarlyLeave,
+      absenceReason: a.absenceReason,
+      lateReason: a.lateReason,
+      earlyLeaveReason: a.earlyLeaveReason,
+    }));
+  }
+
   /** 本日(JST)の打刻状態 */
   async getTodayStatus(userId: string) {
     const workDate = new Date(dateStr(jstNow()));

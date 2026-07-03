@@ -2,9 +2,14 @@ import { Module } from '@nestjs/common';
 import { AttendanceService } from './attendance.service';
 import { AttendanceController } from './attendance.controller';
 import { AttendanceSettingsController } from './attendance-settings.controller';
+import { MyAttendanceController } from './my-attendance.controller';
 
 @Module({
-  controllers: [AttendanceController, AttendanceSettingsController],
+  controllers: [
+    AttendanceController,
+    AttendanceSettingsController,
+    MyAttendanceController,
+  ],
   providers: [AttendanceService],
   exports: [AttendanceService],
 })
