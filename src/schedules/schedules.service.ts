@@ -15,6 +15,8 @@ import { Principal } from '../auth/principal.types';
 import { CreateScheduleDto } from './dto/create-schedule.dto';
 import { UpdateScheduleDto } from './dto/update-schedule.dto';
 import { BulkScheduleDto } from './dto/bulk-schedule.dto';
+import { MySubmitScheduleDto } from './dto/my-submit-schedule.dto';
+import { computeAutoApproveStatus } from './schedule-rules';
 
 @Injectable()
 export class SchedulesService {
@@ -125,5 +127,53 @@ export class SchedulesService {
       skipDuplicates: true,
     });
     return { created: res.count, skipped: dto.dates.length - res.count };
+  }
+
+  // ---------- 利用者本人用（申請） ----------
+
+  /** 自分の予定一覧 */
+  myList(userId: string, from: string, to: string) {
+    return this.prisma.schedule.findMany({
+      where: { userId, planDate: { gte: new Date(from), lte: new Date(to) } },
+      orderBy: { planDate: 'asc' },
+      include: { details: true },
+    });
+  }
+
+  /** 自分の予定を申請（自動承認ルールで承認済/承認待ちが決まる） */
+  async mySubmit(
+    principal: { id: string; corporationId: string; facilityId: string },
+    dto: MySubmitScheduleDto,
+  ) {
+    const status = computeAutoApproveStatus(dto.planDate);
+    const schedule = await this.prisma.schedule.upsert({
+      where: {
+        userId_planDate: {
+          userId: principal.id,
+          planDate: new Date(dto.planDate),
+        },
+      },
+      create: {
+        corporationId: principal.corporationId,
+        facilityId: principal.facilityId,
+        userId: principal.id,
+        planDate: new Date(dto.planDate),
+        planIn: dto.planIn,
+        planOut: dto.planOut,
+        note: dto.note,
+        status,
+        createdBy: principal.id,
+        approvedAt: status === 'approved' ? new Date() : null,
+      },
+      update: {
+        planIn: dto.planIn,
+        planOut: dto.planOut,
+        note: dto.note,
+        status,
+        approvedBy: null,
+        approvedAt: status === 'approved' ? new Date() : null,
+      },
+    });
+    return { schedule, autoApproved: status === 'approved' };
   }
 }
