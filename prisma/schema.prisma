@@ -159,9 +159,10 @@ model User {
 
   corporation Corporation  @relation(fields: [corporationId], references: [id], onDelete: Restrict)
   facility    Facility     @relation(fields: [facilityId], references: [id], onDelete: Restrict)
-  schedules   Schedule[]
-  attendances Attendance[]
-  meals       Meal[]
+  schedules      Schedule[]
+  attendances    Attendance[]
+  meals          Meal[]
+  billingRecords BillingRecord[]
 
   @@index([corporationId])
   @@index([facilityId])
@@ -396,4 +397,27 @@ model TaxSetting {
   @@unique([corporationId, category, effectiveDate])
   @@index([corporationId, effectiveDate])
   @@map("tax_settings")
+}
+
+/// 食事の月次請求（利用者×年月で1件）。入金状況を管理する。
+/// 金額（食事料金・キャンセル料・消費税）は meals から都度集計するため保持しない。
+model BillingRecord {
+  id            String    @id @default(uuid()) @db.Uuid
+  corporationId String    @map("corporation_id") @db.Uuid
+  facilityId    String    @map("facility_id") @db.Uuid
+  userId        String    @map("user_id") @db.Uuid
+  year          Int
+  month         Int // 1-12
+  paymentDate   DateTime? @map("payment_date") @db.Date // 入金日（null=未入金）
+  note          String?
+  createdBy     String?   @map("created_by") @db.Uuid
+  updatedBy     String?   @map("updated_by") @db.Uuid
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, year, month])
+  @@index([facilityId, year, month])
+  @@map("billing_records")
 }
