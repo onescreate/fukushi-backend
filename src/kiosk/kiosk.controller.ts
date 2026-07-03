@@ -4,6 +4,7 @@ import {
   KioskAuthDto,
   KioskBoardDto,
   KioskClockDto,
+  KioskMealDto,
   KioskReasonDto,
   KioskUsersDto,
 } from './dto/kiosk-auth.dto';
@@ -37,6 +38,12 @@ export class KioskController {
   @Post('board')
   board(@Body() dto: KioskBoardDto) {
     return this.service.board(dto.operationToken);
+  }
+
+  /** 本人による喫食の記録/取消 */
+  @Post('meal')
+  meal(@Body() dto: KioskMealDto) {
+    return this.service.recordMeal(dto.operationToken, dto.eaten);
   }
 
   /** 欠席・遅刻・早退の理由入力 */

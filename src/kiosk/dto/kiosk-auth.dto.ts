@@ -1,4 +1,4 @@
-import { IsIn, IsString, MinLength } from 'class-validator';
+import { IsBoolean, IsIn, IsString, MinLength } from 'class-validator';
 
 export class KioskUsersDto {
   @IsString()
@@ -33,6 +33,15 @@ export class KioskBoardDto {
   @IsString()
   @MinLength(1)
   operationToken!: string;
+}
+
+export class KioskMealDto {
+  @IsString()
+  @MinLength(1)
+  operationToken!: string;
+
+  @IsBoolean()
+  eaten!: boolean;
 }
 
 export class KioskReasonDto {

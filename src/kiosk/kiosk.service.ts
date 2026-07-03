@@ -209,6 +209,12 @@ export class KioskService {
     return { today, alerts };
   }
 
+  /** 打刻画面から本人が喫食を記録/取消 */
+  async recordMeal(operationToken: string, eaten: boolean) {
+    const userId = this.verifyOperationToken(operationToken);
+    return this.attendance.recordMealEaten(userId, eaten);
+  }
+
   /** 欠席・遅刻・早退の理由入力 */
   async submitReason(
     operationToken: string,

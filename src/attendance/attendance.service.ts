@@ -133,14 +133,22 @@ export class AttendanceService {
     const attendances = await this.prisma.attendance.findMany({
       where: { facilityId, workDate },
     });
+    const meals = await this.prisma.meal.findMany({
+      where: { facilityId, mealDate: workDate, approvalStatus: 'approved' },
+    });
 
     const schByUser = new Map(schedules.map((s) => [s.userId, s]));
     const attByUser = new Map(attendances.map((a) => [a.userId, a]));
+    const mealByUser = new Map(meals.map((m) => [m.userId, m]));
     const userIds = [
-      ...new Set([...schByUser.keys(), ...attByUser.keys()]),
+      ...new Set([
+        ...schByUser.keys(),
+        ...attByUser.keys(),
+        ...mealByUser.keys(),
+      ]),
     ];
 
-    // 予定にも打刻にも無い利用者（属性用に名前を引く）
+    // 予定に無い利用者（打刻のみ・食事のみ）は名前を別途引く
     const missingNames = userIds.filter((id) => !schByUser.has(id));
     const extraUsers = missingNames.length
       ? await this.prisma.user.findMany({
@@ -153,6 +161,7 @@ export class AttendanceService {
     const rows = userIds.map((userId) => {
       const s = schByUser.get(userId);
       const a = attByUser.get(userId);
+      const m = mealByUser.get(userId);
       const u = s?.user ?? nameMap.get(userId);
       let status: 'present' | 'absent' | 'notyet';
       if (a?.clockIn) status = 'present';
@@ -179,6 +188,10 @@ export class AttendanceService {
         absenceReason: a?.absenceReason ?? null,
         lateReason: a?.lateReason ?? null,
         earlyLeaveReason: a?.earlyLeaveReason ?? null,
+        meal:
+          m && (m.status === 'reserved' || m.status === 'eaten')
+            ? { status: m.status }
+            : null,
       };
     });
     rows.sort((x, y) => x.name.localeCompare(y.name, 'ja'));
@@ -238,13 +251,23 @@ export class AttendanceService {
     return { ok: true };
   }
 
-  /** 打刻画面に出す「今日の予定・中抜け」情報 */
+  /** 打刻画面に出す「今日の予定・中抜け・食事」情報 */
   async getTodayInfo(userId: string) {
     const workDate = new Date(dateStr(jstNow()));
     const schedule = await this.prisma.schedule.findUnique({
       where: { userId_planDate: { userId, planDate: workDate } },
       include: { details: true },
     });
+    const meal = await this.prisma.meal.findUnique({
+      where: { userId_mealDate: { userId, mealDate: workDate } },
+    });
+    // 承認済みの予約/喫食のみ打刻画面に出す（承認待ち・取消・却下は出さない）
+    const mealInfo =
+      meal &&
+      meal.approvalStatus === 'approved' &&
+      (meal.status === 'reserved' || meal.status === 'eaten')
+        ? { status: meal.status }
+        : null;
     return {
       planIn: schedule?.planIn ?? null,
       planOut: schedule?.planOut ?? null,
@@ -255,9 +278,28 @@ export class AttendanceService {
           plannedOut: d.plannedOut,
           plannedIn: d.plannedIn,
         })),
-      // 食事は Phase 3（食事管理）で実装予定
-      meal: null as null | { status: string },
+      meal: mealInfo as null | { status: string },
     };
+  }
+
+  /** 打刻画面から本人が喫食を記録/取消（本日の承認済み予約のみ対象） */
+  async recordMealEaten(userId: string, eaten: boolean) {
+    const workDate = new Date(dateStr(jstNow()));
+    const meal = await this.prisma.meal.findUnique({
+      where: { userId_mealDate: { userId, mealDate: workDate } },
+    });
+    if (
+      !meal ||
+      meal.approvalStatus !== 'approved' ||
+      (meal.status !== 'reserved' && meal.status !== 'eaten')
+    ) {
+      throw new BadRequestException('本日の食事予約がありません');
+    }
+    await this.prisma.meal.update({
+      where: { id: meal.id },
+      data: { status: eaten ? 'eaten' : 'reserved', updatedBy: userId },
+    });
+    return { status: eaten ? 'eaten' : 'reserved' };
   }
 
   /** 打刻画面に出すアラート（差戻・理由未入力） */
