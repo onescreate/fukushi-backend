@@ -129,6 +129,50 @@ export class SchedulesService {
     return { created: res.count, skipped: dto.dates.length - res.count };
   }
 
+  // ---------- 承認（管理側） ----------
+
+  /** スコープ内の承認待ち予定 */
+  listPending(principal: Principal) {
+    const scope = computeAccessScope(principal);
+    const where: Prisma.ScheduleWhereInput = { status: 'pending' };
+    if (!scope.crossTenant) {
+      if (scope.allFacilitiesInCorporation) {
+        where.corporationId = scope.corporationId ?? '__none__';
+      } else {
+        where.facilityId = { in: scope.facilityIds };
+      }
+    }
+    return this.prisma.schedule.findMany({
+      where,
+      orderBy: { planDate: 'asc' },
+      include: { user: { select: { lastName: true, firstName: true } } },
+    });
+  }
+
+  async pendingCount(principal: Principal) {
+    const list = await this.listPending(principal);
+    return { count: list.length };
+  }
+
+  async decide(
+    principal: Principal,
+    id: string,
+    decision: 'approved' | 'rejected',
+  ) {
+    const scope = computeAccessScope(principal);
+    const schedule = await this.prisma.schedule.findUnique({ where: { id } });
+    if (!schedule) throw new NotFoundException('予定が見つかりません');
+    await this.userInScope(scope, schedule.userId);
+    return this.prisma.schedule.update({
+      where: { id },
+      data: {
+        status: decision,
+        approvedBy: principal.id,
+        approvedAt: new Date(),
+      },
+    });
+  }
+
   // ---------- 利用者本人用（申請） ----------
 
   /** 自分の予定一覧 */

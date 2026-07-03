@@ -31,6 +31,30 @@ export class SchedulesController {
     return this.service.list(principal, userId, from, to);
   }
 
+  @RequirePermission('schedule.approve')
+  @Get('pending')
+  pending(@CurrentUser() principal: Principal) {
+    return this.service.listPending(principal);
+  }
+
+  @RequirePermission('schedule.approve')
+  @Get('pending/count')
+  pendingCount(@CurrentUser() principal: Principal) {
+    return this.service.pendingCount(principal);
+  }
+
+  @RequirePermission('schedule.approve')
+  @Patch(':id/approve')
+  approve(@CurrentUser() principal: Principal, @Param('id') id: string) {
+    return this.service.decide(principal, id, 'approved');
+  }
+
+  @RequirePermission('schedule.approve')
+  @Patch(':id/reject')
+  reject(@CurrentUser() principal: Principal, @Param('id') id: string) {
+    return this.service.decide(principal, id, 'rejected');
+  }
+
   @RequirePermission('schedule.submit')
   @Post()
   create(@CurrentUser() principal: Principal, @Body() dto: CreateScheduleDto) {
