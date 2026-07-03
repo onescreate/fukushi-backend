@@ -39,4 +39,24 @@ export class FirebaseService implements OnModuleInit {
   auth(): Auth {
     return getAuth(this.app);
   }
+
+  /** メール＋パスワードでFirebaseユーザーを作成し uid を返す。 */
+  async createUser(params: {
+    email: string;
+    password: string;
+    displayName?: string;
+  }): Promise<string> {
+    const user = await getAuth(this.app).createUser(params);
+    return user.uid;
+  }
+
+  /** パスワードを再設定する。 */
+  setPassword(uid: string, password: string): Promise<unknown> {
+    return getAuth(this.app).updateUser(uid, { password });
+  }
+
+  /** Firebaseユーザーを削除する。 */
+  deleteUser(uid: string): Promise<void> {
+    return getAuth(this.app).deleteUser(uid);
+  }
 }
