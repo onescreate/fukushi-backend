@@ -12,6 +12,8 @@ import { InvoiceSettingController } from './invoice-setting.controller';
 import { InvoiceSettingService } from './invoice-setting.service';
 import { DeliveryController } from './delivery.controller';
 import { DeliveryService } from './delivery.service';
+import { StatsController } from './stats.controller';
+import { StatsService } from './stats.service';
 
 @Module({
   controllers: [
@@ -22,6 +24,7 @@ import { DeliveryService } from './delivery.service';
     BillingController,
     InvoiceSettingController,
     DeliveryController,
+    StatsController,
   ],
   providers: [
     MealPricingService,
@@ -30,6 +33,7 @@ import { DeliveryService } from './delivery.service';
     BillingService,
     InvoiceSettingService,
     DeliveryService,
+    StatsService,
   ],
   exports: [MealPricingService, TaxSettingService, MealReservationService],
 })
