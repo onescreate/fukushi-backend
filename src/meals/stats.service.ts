@@ -1,15 +1,9 @@
-import {
-  BadRequestException,
-  ForbiddenException,
-  Injectable,
-} from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import {
-  canAccessFacility,
-  computeAccessScope,
-} from '../auth/access-scope';
+import { computeAccessScope } from '../auth/access-scope';
 import { getPermissionsForPrincipal } from '../auth/permissions';
 import { Principal } from '../auth/principal.types';
+import { resolveFacilityIds } from '../common/facility-scope';
 import { BillingService } from './billing.service';
 
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -28,14 +22,12 @@ export class StatsService {
     year: number,
     month: number,
   ) {
-    const scope = computeAccessScope(principal);
-    const facility = await this.prisma.facility
-      .findUnique({ where: { id: facilityId } })
-      .catch(() => null);
-    if (!facility) throw new BadRequestException('店舗が存在しません');
-    if (!canAccessFacility(scope, facility)) {
-      throw new ForbiddenException('この店舗を閲覧する権限がありません');
-    }
+    const facilityIds = await resolveFacilityIds(
+      this.prisma,
+      principal,
+      facilityId,
+    );
+    const facFilter = { in: facilityIds };
 
     const lastDay = new Date(year, month, 0).getDate();
     const from = new Date(`${year}-${pad(month)}-01`);
@@ -45,25 +37,25 @@ export class StatsService {
     // 通所
     const [planned, present, absent, late, earlyLeave] = await Promise.all([
       this.prisma.schedule.count({
-        where: { facilityId, status: 'approved', planDate: range },
+        where: { facilityId: facFilter, status: 'approved', planDate: range },
       }),
       this.prisma.attendance.count({
-        where: { facilityId, workDate: range, clockIn: { not: null } },
+        where: { facilityId: facFilter, workDate: range, clockIn: { not: null } },
       }),
       this.prisma.attendance.count({
-        where: { facilityId, workDate: range, status: 'absent' },
+        where: { facilityId: facFilter, workDate: range, status: 'absent' },
       }),
       this.prisma.attendance.count({
-        where: { facilityId, workDate: range, isLate: true },
+        where: { facilityId: facFilter, workDate: range, isLate: true },
       }),
       this.prisma.attendance.count({
-        where: { facilityId, workDate: range, isEarlyLeave: true },
+        where: { facilityId: facFilter, workDate: range, isEarlyLeave: true },
       }),
     ]);
 
     // 食事（承認済み）
     const mealBase = {
-      facilityId,
+      facilityId: facFilter,
       approvalStatus: 'approved' as const,
       mealDate: range,
     };

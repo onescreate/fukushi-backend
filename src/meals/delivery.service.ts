@@ -9,6 +9,7 @@ import {
   computeAccessScope,
 } from '../auth/access-scope';
 import { Principal } from '../auth/principal.types';
+import { ALL_FACILITIES, resolveFacilityIds } from '../common/facility-scope';
 
 const pad = (n: number) => String(n).padStart(2, '0');
 
@@ -38,14 +39,19 @@ export class DeliveryService {
     year: number,
     month: number,
   ) {
-    await this.assertFacility(principal, facilityId);
+    const facilityIds = await resolveFacilityIds(
+      this.prisma,
+      principal,
+      facilityId,
+    );
+    const allMode = facilityId === ALL_FACILITIES;
     const lastDay = new Date(year, month, 0).getDate();
     const from = new Date(`${year}-${pad(month)}-01`);
     const to = new Date(`${year}-${pad(month)}-${pad(lastDay)}`);
 
     const meals = await this.prisma.meal.findMany({
       where: {
-        facilityId,
+        facilityId: { in: facilityIds },
         approvalStatus: 'approved',
         status: { in: ['reserved', 'eaten'] },
         mealDate: { gte: from, lte: to },
@@ -59,15 +65,20 @@ export class DeliveryService {
     }
 
     const deliveries = await this.prisma.mealDelivery.findMany({
-      where: { facilityId, deliveryDate: { gte: from, lte: to } },
+      where: { facilityId: { in: facilityIds }, deliveryDate: { gte: from, lte: to } },
     });
-    const delByDate = new Map(
-      deliveries.map((d) => [d.deliveryDate.toISOString().slice(0, 10), d]),
-    );
+    // 全店舗時は同一日に複数店舗の納品があり得るので合算する
+    const delSumByDate = new Map<string, number>();
+    const delNoteByDate = new Map<string, string | null>();
+    for (const d of deliveries) {
+      const key = d.deliveryDate.toISOString().slice(0, 10);
+      delSumByDate.set(key, (delSumByDate.get(key) ?? 0) + d.deliveryCount);
+      if (!allMode) delNoteByDate.set(key, d.note ?? null);
+    }
 
     const dates = new Set<string>([
       ...orderByDate.keys(),
-      ...delByDate.keys(),
+      ...delSumByDate.keys(),
     ]);
     const days: Record<
       string,
@@ -78,9 +89,10 @@ export class DeliveryService {
 
     for (const date of dates) {
       const orderCount = orderByDate.get(date) ?? 0;
-      const del = delByDate.get(date);
-      const deliveryCount = del ? del.deliveryCount : null;
-      days[date] = { orderCount, deliveryCount, note: del?.note ?? null };
+      const deliveryCount = delSumByDate.has(date)
+        ? (delSumByDate.get(date) ?? 0)
+        : null;
+      days[date] = { orderCount, deliveryCount, note: delNoteByDate.get(date) ?? null };
       if (orderCount > 0 && deliveryCount === null) unentered.push(date);
       if (deliveryCount !== null && deliveryCount !== orderCount) {
         mismatch.push({ date, orderCount, deliveryCount });
@@ -89,7 +101,7 @@ export class DeliveryService {
     unentered.sort();
     mismatch.sort((a, b) => a.date.localeCompare(b.date));
 
-    return { year, month, days, unentered, mismatch };
+    return { year, month, allMode, days, unentered, mismatch };
   }
 
   /** 納品数・備考を設定（店舗×日）。 */

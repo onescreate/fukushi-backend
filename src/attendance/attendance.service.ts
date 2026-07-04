@@ -9,6 +9,10 @@ import {
   computeAccessScope,
 } from '../auth/access-scope';
 import { Principal } from '../auth/principal.types';
+import {
+  ALL_FACILITIES,
+  resolveFacilityIds,
+} from '../common/facility-scope';
 import { UpdateAttendanceSettingsDto } from './dto/attendance-settings.dto';
 import { ManualAttendanceDto } from './dto/manual-attendance.dto';
 
@@ -109,32 +113,42 @@ export class AttendanceService {
     return { clockedIn: !!att?.clockIn, clockedOut: !!att?.clockOut };
   }
 
-  /** 当日ロースター（店舗×日付の利用者一覧＋予定＋打刻状況） */
+  /** 当日ロースター（店舗×日付の利用者一覧＋予定＋打刻状況）。facilityId='all'で全店舗合算。 */
   async roster(principal: Principal, facilityId: string, date: string) {
-    const scope = computeAccessScope(principal);
-    const facility = await this.prisma.facility
-      .findUnique({ where: { id: facilityId } })
-      .catch(() => null);
-    if (!facility) throw new BadRequestException('店舗が存在しません');
-    if (!canAccessFacility(scope, facility)) {
-      throw new ForbiddenException('この店舗を閲覧する権限がありません');
-    }
+    const facilityIds = await resolveFacilityIds(
+      this.prisma,
+      principal,
+      facilityId,
+    );
+    const allMode = facilityId === ALL_FACILITIES;
+    const facMap = new Map(
+      (
+        await this.prisma.facility.findMany({
+          where: { id: { in: facilityIds } },
+          select: { id: true, name: true },
+        })
+      ).map((f) => [f.id, f.name]),
+    );
 
     const workDate = new Date(date);
     const todayStr = dateStr(jstNow());
 
     const schedules = await this.prisma.schedule.findMany({
-      where: { facilityId, planDate: workDate },
+      where: { facilityId: { in: facilityIds }, planDate: workDate },
       include: {
         user: { select: { lastName: true, firstName: true } },
         details: true,
       },
     });
     const attendances = await this.prisma.attendance.findMany({
-      where: { facilityId, workDate },
+      where: { facilityId: { in: facilityIds }, workDate },
     });
     const meals = await this.prisma.meal.findMany({
-      where: { facilityId, mealDate: workDate, approvalStatus: 'approved' },
+      where: {
+        facilityId: { in: facilityIds },
+        mealDate: workDate,
+        approvalStatus: 'approved',
+      },
     });
 
     const schByUser = new Map(schedules.map((s) => [s.userId, s]));
@@ -163,6 +177,7 @@ export class AttendanceService {
       const a = attByUser.get(userId);
       const m = mealByUser.get(userId);
       const u = s?.user ?? nameMap.get(userId);
+      const fid = s?.facilityId ?? a?.facilityId ?? m?.facilityId ?? '';
       let status: 'present' | 'absent' | 'notyet';
       if (a?.clockIn) status = 'present';
       else if (a?.status === 'absent') status = 'absent';
@@ -170,6 +185,7 @@ export class AttendanceService {
       return {
         userId,
         name: u ? `${u.lastName} ${u.firstName}` : '—',
+        facilityName: allMode ? (facMap.get(fid) ?? '') : null,
         planIn: s?.planIn ?? null,
         planOut: s?.planOut ?? null,
         scheduleStatus: s?.status ?? null,

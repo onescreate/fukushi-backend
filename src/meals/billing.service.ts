@@ -11,6 +11,7 @@ import {
   computeAccessScope,
 } from '../auth/access-scope';
 import { Principal } from '../auth/principal.types';
+import { ALL_FACILITIES, resolveFacilityIds } from '../common/facility-scope';
 import { computeTax } from './tax-util';
 
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -154,26 +155,50 @@ export class BillingService {
     year: number,
     month: number,
   ) {
-    const facility = await this.assertFacility(principal, facilityId);
-    const closing = await this.prisma.billingClosing.findUnique({
-      where: this.closingKey(facilityId, year, month),
+    const facilityIds = await resolveFacilityIds(
+      this.prisma,
+      principal,
+      facilityId,
+    );
+    const allMode = facilityId === ALL_FACILITIES;
+    const facilities = await this.prisma.facility.findMany({
+      where: { id: { in: facilityIds } },
+      select: { id: true, name: true, corporationId: true },
     });
+
+    const closing = allMode
+      ? null
+      : await this.prisma.billingClosing.findUnique({
+          where: this.closingKey(facilityId, year, month),
+        });
     const records = await this.prisma.billingRecord.findMany({
-      where: { facilityId, year, month },
+      where: { facilityId: { in: facilityIds }, year, month },
     });
     const recByUser = new Map(records.map((r) => [r.userId, r]));
 
-    type AmountRow = Awaited<ReturnType<BillingService['aggregate']>>[number];
-    const baseRows: AmountRow[] = closing
-      ? records
-          .filter((r) => r.closedSnapshot)
-          .map((r) => r.closedSnapshot as unknown as AmountRow)
-      : await this.aggregate(facility.corporationId, facilityId, year, month);
+    type AmountRow = Awaited<ReturnType<BillingService['aggregate']>>[number] & {
+      facilityName?: string | null;
+    };
+    let baseRows: AmountRow[];
+    if (closing) {
+      baseRows = records
+        .filter((r) => r.closedSnapshot)
+        .map((r) => r.closedSnapshot as unknown as AmountRow);
+    } else {
+      baseRows = [];
+      for (const f of facilities) {
+        const fr = await this.aggregate(f.corporationId, f.id, year, month);
+        baseRows.push(
+          ...fr.map((r) => (allMode ? { ...r, facilityName: f.name } : r)),
+        );
+      }
+    }
 
     const rows = baseRows.map((a) => {
       const rec = recByUser.get(a.userId);
       return {
         ...a,
+        facilityName: a.facilityName ?? null,
         paymentDate: rec?.paymentDate
           ? rec.paymentDate.toISOString().slice(0, 10)
           : null,
@@ -187,6 +212,7 @@ export class BillingService {
       taxRate: rows[0]?.taxRate ?? null,
       closed: !!closing,
       closedAt: closing?.closedAt.toISOString() ?? null,
+      allMode,
       rows,
     };
   }

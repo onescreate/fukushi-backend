@@ -12,6 +12,7 @@ import {
   computeAccessScope,
 } from '../auth/access-scope';
 import { Principal } from '../auth/principal.types';
+import { ALL_FACILITIES, resolveFacilityIds } from '../common/facility-scope';
 import { classifyMealWindow } from './meal-rules';
 import { MySubmitMealDto } from './dto/my-submit-meal.dto';
 import { AdminMealDto } from './dto/admin-meal.dto';
@@ -308,24 +309,30 @@ export class MealReservationService {
 
   // ---------- 管理側（override） ----------
 
-  /** 店舗の食事予約一覧（期間）。利用者名つき。 */
+  /** 店舗の食事予約一覧（期間）。利用者名つき。facilityId='all'で全店舗合算。 */
   async list(
     principal: Principal,
     facilityId: string,
     from: string,
     to: string,
   ) {
-    const scope = computeAccessScope(principal);
-    const facility = await this.prisma.facility.findUnique({
-      where: { id: facilityId },
-    });
-    if (!facility) throw new BadRequestException('店舗が存在しません');
-    if (!canAccessFacility(scope, facility)) {
-      throw new ForbiddenException('この店舗の食事を閲覧する権限がありません');
-    }
+    const facilityIds = await resolveFacilityIds(
+      this.prisma,
+      principal,
+      facilityId,
+    );
+    const allMode = facilityId === ALL_FACILITIES;
+    const facMap = new Map(
+      (
+        await this.prisma.facility.findMany({
+          where: { id: { in: facilityIds } },
+          select: { id: true, name: true },
+        })
+      ).map((f) => [f.id, f.name]),
+    );
     const rows = await this.prisma.meal.findMany({
       where: {
-        facilityId,
+        facilityId: { in: facilityIds },
         mealDate: { gte: new Date(from), lte: new Date(to) },
       },
       orderBy: [{ mealDate: 'asc' }],
@@ -334,6 +341,7 @@ export class MealReservationService {
     return rows.map((m) => ({
       ...this.serialize(m),
       userName: `${m.user.lastName} ${m.user.firstName}`,
+      facilityName: allMode ? (facMap.get(m.facilityId) ?? '') : null,
     }));
   }
 
