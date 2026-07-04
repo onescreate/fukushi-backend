@@ -127,7 +127,10 @@ export class BillingService {
     });
     const recByUser = new Map(records.map((r) => [r.userId, r]));
 
-    const rows = [...byUser.entries()].map(([userId, a]) => {
+    const rows = [...byUser.entries()]
+      // 無料取消(revoked)のみで請求額のない利用者は一覧から除外
+      .filter(([, a]) => a.mealCount > 0 || a.cancelCount > 0)
+      .map(([userId, a]) => {
       const total = a.mealTotal + a.cancelTotal;
       const taxAmount = tax
         ? computeTax(total, tax.rate, tax.priceIncludesTax, tax.rounding)

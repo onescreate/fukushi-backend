@@ -178,6 +178,24 @@ export class MealReservationService {
       });
 
       if (dto.action === 'reserve') {
+        // 既に承認済みの予約がある日は、承認済みを維持する（誤って承認待ちに降格させない）。
+        if (
+          existing &&
+          existing.status === 'reserved' &&
+          existing.approvalStatus === 'approved'
+        ) {
+          if (existing.requestType === 'cancel') {
+            // キャンセル申請中 → 予約を続けるので申請を取り下げる
+            await this.prisma.meal.update({
+              where: { id: existing.id },
+              data: { requestType: null, updatedBy: user.id },
+            });
+            result.reserved++;
+          } else {
+            result.skipped.push({ date, reason: '既に予約済みです' });
+          }
+          continue;
+        }
         // 却下済み/取消済み/新規 → 予約申請または即確定
         const fee = await this.computeMealFee(user, date);
         const isFree = window === 'free';
@@ -212,7 +230,7 @@ export class MealReservationService {
         else result.pendingReserve++;
       } else {
         // cancel
-        if (!existing || existing.status !== 'reserved') {
+        if (!existing) {
           result.skipped.push({ date, reason: '予約がありません' });
           continue;
         }
@@ -225,13 +243,17 @@ export class MealReservationService {
           result.revoked++;
           continue;
         }
+        // 取消できるのは「承認済みの予約」のみ（却下・取消済・キャンセル済は対象外）
+        if (existing.status !== 'reserved' || existing.approvalStatus !== 'approved') {
+          result.skipped.push({ date, reason: '予約がありません' });
+          continue;
+        }
         if (window === 'free') {
           await this.prisma.meal.update({
             where: { id: existing.id },
             data: {
               status: 'revoked',
               amount: 0,
-              approvalStatus: 'approved',
               requestType: null,
               updatedBy: user.id,
               approvedAt: new Date(),
@@ -239,15 +261,14 @@ export class MealReservationService {
           });
           result.revoked++;
         } else {
-          // 申請扱い: キャンセル申請（承認でキャンセル料課金）
+          // 申請扱い: キャンセル申請。承認状態は approved のまま維持し、
+          // requestType=cancel で「承認待ちのキャンセル申請」を表す
+          // （承認されるまで予約は有効＝発注数・請求から消えない）。
           await this.prisma.meal.update({
             where: { id: existing.id },
             data: {
-              approvalStatus: 'pending',
               requestType: 'cancel',
               updatedBy: user.id,
-              approvedBy: null,
-              approvedAt: null,
             },
           });
           result.pendingCancel++;
@@ -342,7 +363,9 @@ export class MealReservationService {
 
   private pendingWhere(principal: Principal): Prisma.MealWhereInput {
     const scope = computeAccessScope(principal);
-    const where: Prisma.MealWhereInput = { approvalStatus: 'pending' };
+    // 承認待ち＝予約申請(requestType=reserve)またはキャンセル申請(requestType=cancel)。
+    // キャンセル申請中は approvalStatus=approved のままなので requestType で判定する。
+    const where: Prisma.MealWhereInput = { requestType: { not: null } };
     if (!scope.crossTenant) {
       if (scope.allFacilitiesInCorporation) {
         where.corporationId = scope.corporationId ?? '__none__';
@@ -381,7 +404,7 @@ export class MealReservationService {
     const meal = await this.prisma.meal.findUnique({ where: { id } });
     if (!meal) throw new NotFoundException('食事予約が見つかりません');
     await this.userInScope(scope, meal.userId);
-    if (meal.approvalStatus !== 'pending') {
+    if (meal.requestType === null) {
       throw new BadRequestException('承認待ちの申請ではありません');
     }
 
