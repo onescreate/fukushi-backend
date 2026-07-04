@@ -27,6 +27,7 @@ export const PERMISSIONS = [
   'health.view',
   'health.edit',
   'closing.manage',
+  'announcement.manage', // お知らせの投稿・編集
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -63,6 +64,7 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     'health.view',
     'health.edit',
     'closing.manage',
+    'announcement.manage',
   ],
 
   staff: [
