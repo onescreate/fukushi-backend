@@ -95,6 +95,7 @@ model Facility {
   mealPricings      MealPricing[]
   invoiceSettings   InvoiceSetting[]
   mealDeliveries    MealDelivery[]
+  billingClosings   BillingClosing[]
 
   @@index([corporationId])
   @@map("facilities")
@@ -456,6 +457,7 @@ model BillingRecord {
   month         Int // 1-12
   paymentDate   DateTime? @map("payment_date") @db.Date // 入金日（null=未入金）
   note          String?
+  closedSnapshot Json?    @map("closed_snapshot") // 月締め時に確定した金額のスナップショット
   createdBy     String?   @map("created_by") @db.Uuid
   updatedBy     String?   @map("updated_by") @db.Uuid
   createdAt     DateTime  @default(now()) @map("created_at")
@@ -466,4 +468,20 @@ model BillingRecord {
   @@unique([userId, year, month])
   @@index([facilityId, year, month])
   @@map("billing_records")
+}
+
+/// 月締め（店舗×年月）。この行が存在する間はその月の食事編集をロックし、請求は確定額で固定する。
+model BillingClosing {
+  id            String   @id @default(uuid()) @db.Uuid
+  corporationId String   @map("corporation_id") @db.Uuid
+  facilityId    String   @map("facility_id") @db.Uuid
+  year          Int
+  month         Int // 1-12
+  closedBy      String?  @map("closed_by") @db.Uuid
+  closedAt      DateTime @default(now()) @map("closed_at")
+
+  facility Facility @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+
+  @@unique([facilityId, year, month])
+  @@map("billing_closings")
 }

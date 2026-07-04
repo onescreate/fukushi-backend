@@ -69,27 +69,21 @@ export class BillingService {
   }
 
   /**
-   * 店舗×年月の食事請求一覧（利用者ごと）。
-   * 金額は承認済み meal を集計（食事料金＝reserved/eaten、キャンセル料＝cancelled）。
-   * 消費税は内税前提で総額から逆算した内訳を返す。入金状況は billing_records から。
+   * 承認済み meal を利用者ごとに集計（金額のみ・入金/メモ除く）。
+   * 食事料金＝reserved/eaten、キャンセル料＝cancelled。消費税は食事料金(内税)のみ対象。
    */
-  async list(
-    principal: Principal,
+  private async aggregate(
+    corporationId: string,
     facilityId: string,
     year: number,
     month: number,
   ) {
-    const facility = await this.assertFacility(principal, facilityId);
     const lastDay = new Date(year, month, 0).getDate();
     const from = new Date(`${year}-${pad(month)}-01`);
     const to = new Date(`${year}-${pad(month)}-${pad(lastDay)}`);
 
     const meals = await this.prisma.meal.findMany({
-      where: {
-        facilityId,
-        approvalStatus: 'approved',
-        mealDate: { gte: from, lte: to },
-      },
+      where: { facilityId, approvalStatus: 'approved', mealDate: { gte: from, lte: to } },
       include: { user: { select: { lastName: true, firstName: true } } },
     });
 
@@ -121,33 +115,65 @@ export class BillingService {
       byUser.set(m.userId, a);
     }
 
-    const tax = await this.taxForMonth(facility.corporationId, year, month);
+    const tax = await this.taxForMonth(corporationId, year, month);
+    return [...byUser.entries()]
+      // 無料取消(revoked)のみで請求額のない利用者は一覧から除外
+      .filter(([, a]) => a.mealCount > 0 || a.cancelCount > 0)
+      .map(([userId, a]) => {
+        const total = a.mealTotal + a.cancelTotal;
+        // 消費税は食事料金(内税)のみ対象。キャンセル料は不課税。
+        const taxAmount = tax
+          ? computeTax(a.mealTotal, tax.rate, tax.priceIncludesTax, tax.rounding)
+          : 0;
+        return {
+          userId,
+          userName: a.userName,
+          mealCount: a.mealCount,
+          mealTotal: a.mealTotal,
+          cancelCount: a.cancelCount,
+          cancelTotal: a.cancelTotal,
+          total,
+          taxAmount,
+          subtotal: a.mealTotal - taxAmount,
+          taxRate: tax?.rate ?? null,
+        };
+      });
+  }
+
+  private closingKey(facilityId: string, year: number, month: number) {
+    return { facilityId_year_month: { facilityId, year, month } };
+  }
+
+  /**
+   * 店舗×年月の食事請求一覧。締め済みなら確定額（スナップショット）、未締めならライブ集計。
+   * 入金状況・メモは billing_records から付与する。
+   */
+  async list(
+    principal: Principal,
+    facilityId: string,
+    year: number,
+    month: number,
+  ) {
+    const facility = await this.assertFacility(principal, facilityId);
+    const closing = await this.prisma.billingClosing.findUnique({
+      where: this.closingKey(facilityId, year, month),
+    });
     const records = await this.prisma.billingRecord.findMany({
       where: { facilityId, year, month },
     });
     const recByUser = new Map(records.map((r) => [r.userId, r]));
 
-    const rows = [...byUser.entries()]
-      // 無料取消(revoked)のみで請求額のない利用者は一覧から除外
-      .filter(([, a]) => a.mealCount > 0 || a.cancelCount > 0)
-      .map(([userId, a]) => {
-      const total = a.mealTotal + a.cancelTotal;
-      // 消費税は食事料金(mealTotal・内税)のみが対象。キャンセル料は不課税（税抜扱い）。
-      const taxAmount = tax
-        ? computeTax(a.mealTotal, tax.rate, tax.priceIncludesTax, tax.rounding)
-        : 0;
-      const rec = recByUser.get(userId);
+    type AmountRow = Awaited<ReturnType<BillingService['aggregate']>>[number];
+    const baseRows: AmountRow[] = closing
+      ? records
+          .filter((r) => r.closedSnapshot)
+          .map((r) => r.closedSnapshot as unknown as AmountRow)
+      : await this.aggregate(facility.corporationId, facilityId, year, month);
+
+    const rows = baseRows.map((a) => {
+      const rec = recByUser.get(a.userId);
       return {
-        userId,
-        userName: a.userName,
-        mealCount: a.mealCount,
-        mealTotal: a.mealTotal, // 食事料金（税込・8%対象）
-        cancelCount: a.cancelCount,
-        cancelTotal: a.cancelTotal, // キャンセル料（不課税）
-        total, // 総額
-        taxAmount, // 消費税（食事のみ）
-        subtotal: a.mealTotal - taxAmount, // 8%対象の税抜
-        taxRate: tax?.rate ?? null,
+        ...a,
         paymentDate: rec?.paymentDate
           ? rec.paymentDate.toISOString().slice(0, 10)
           : null,
@@ -155,7 +181,73 @@ export class BillingService {
       };
     });
     rows.sort((x, y) => x.userName.localeCompare(y.userName, 'ja'));
-    return { year, month, taxRate: tax?.rate ?? null, rows };
+    return {
+      year,
+      month,
+      taxRate: rows[0]?.taxRate ?? null,
+      closed: !!closing,
+      closedAt: closing?.closedAt.toISOString() ?? null,
+      rows,
+    };
+  }
+
+  /** 月締め: 確定額をスナップショットし、その月の食事編集をロックする。 */
+  async close(
+    principal: Principal,
+    facilityId: string,
+    year: number,
+    month: number,
+  ) {
+    const facility = await this.assertFacility(principal, facilityId);
+    const rows = await this.aggregate(
+      facility.corporationId,
+      facilityId,
+      year,
+      month,
+    );
+    const staffId = principal.type === 'staff' ? principal.id : null;
+    for (const r of rows) {
+      await this.prisma.billingRecord.upsert({
+        where: { userId_year_month: { userId: r.userId, year, month } },
+        create: {
+          corporationId: facility.corporationId,
+          facilityId,
+          userId: r.userId,
+          year,
+          month,
+          closedSnapshot: r,
+          createdBy: staffId,
+          updatedBy: staffId,
+        },
+        update: { closedSnapshot: r, updatedBy: staffId },
+      });
+    }
+    await this.prisma.billingClosing.upsert({
+      where: this.closingKey(facilityId, year, month),
+      create: {
+        corporationId: facility.corporationId,
+        facilityId,
+        year,
+        month,
+        closedBy: staffId,
+      },
+      update: { closedBy: staffId, closedAt: new Date() },
+    });
+    return { ok: true };
+  }
+
+  /** 月の締めを解除（再開）。食事編集が再び可能になる。 */
+  async reopen(
+    principal: Principal,
+    facilityId: string,
+    year: number,
+    month: number,
+  ) {
+    await this.assertFacility(principal, facilityId);
+    await this.prisma.billingClosing.deleteMany({
+      where: { facilityId, year, month },
+    });
+    return { ok: true };
   }
 
   /** 利用者×年月の食事明細（日別）。請求の内訳表示に使う。 */

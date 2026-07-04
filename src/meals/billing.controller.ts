@@ -4,12 +4,17 @@ import {
   Get,
   Patch,
   ParseIntPipe,
+  Post,
   Query,
 } from '@nestjs/common';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { Principal } from '../auth/principal.types';
 import { RequirePermission } from '../auth/require-permission.decorator';
-import { BillingNoteDto, BillingPaymentDto } from './dto/billing.dto';
+import {
+  BillingCloseDto,
+  BillingNoteDto,
+  BillingPaymentDto,
+} from './dto/billing.dto';
 import { BillingService } from './billing.service';
 
 // 食事の月次請求・入金管理。閲覧=billing.view、入金/メモ=billing.payment。
@@ -63,5 +68,17 @@ export class BillingController {
       dto.month,
       dto.note ?? '',
     );
+  }
+
+  @RequirePermission('closing.manage')
+  @Post('close')
+  close(@CurrentUser() principal: Principal, @Body() dto: BillingCloseDto) {
+    return this.service.close(principal, dto.facilityId, dto.year, dto.month);
+  }
+
+  @RequirePermission('closing.manage')
+  @Post('reopen')
+  reopen(@CurrentUser() principal: Principal, @Body() dto: BillingCloseDto) {
+    return this.service.reopen(principal, dto.facilityId, dto.year, dto.month);
   }
 }

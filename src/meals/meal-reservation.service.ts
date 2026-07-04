@@ -96,6 +96,15 @@ export class MealReservationService {
     return pricing ? pricing.cancelFee : null;
   }
 
+  /** 対象日の月が締め済み（ロック中）か。 */
+  private async isMonthClosed(facilityId: string, mealDateStr: string) {
+    const [year, month] = mealDateStr.split('-').map(Number);
+    const c = await this.prisma.billingClosing.findUnique({
+      where: { facilityId_year_month: { facilityId, year, month } },
+    });
+    return !!c;
+  }
+
   /** その利用者に、対象日の承認済み通所予定があるか。 */
   private async hasSchedule(userId: string, mealDateStr: string) {
     const s = await this.prisma.schedule.findUnique({
@@ -176,6 +185,10 @@ export class MealReservationService {
       const window = classifyMealWindow(date, deadlineDays);
       if (window === 'closed') {
         result.skipped.push({ date, reason: '締切（前日15時）を過ぎています' });
+        continue;
+      }
+      if (await this.isMonthClosed(user.facilityId, date)) {
+        result.skipped.push({ date, reason: '請求が締め済みの月です' });
         continue;
       }
       if (!(await this.hasSchedule(user.id, date))) {
@@ -335,6 +348,9 @@ export class MealReservationService {
     if (!mealsEnabled) {
       throw new BadRequestException('この店舗では食事機能が無効です');
     }
+    if (await this.isMonthClosed(user.facilityId, dto.date)) {
+      throw new BadRequestException('請求が締め済みの月のため編集できません');
+    }
     if (dto.status === 'reserved' && !(await this.hasSchedule(dto.userId, dto.date))) {
       throw new BadRequestException('通所予定がない日は予約できません');
     }
@@ -437,6 +453,14 @@ export class MealReservationService {
     await this.userInScope(scope, meal.userId);
     if (meal.requestType === null) {
       throw new BadRequestException('承認待ちの申請ではありません');
+    }
+    if (
+      await this.isMonthClosed(
+        meal.facilityId,
+        meal.mealDate.toISOString().slice(0, 10),
+      )
+    ) {
+      throw new BadRequestException('請求が締め済みの月のため操作できません');
     }
 
     const base = {

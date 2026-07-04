@@ -7,6 +7,7 @@ import {
   Max,
   MaxLength,
   Min,
+  MinLength,
   ValidateIf,
 } from 'class-validator';
 
@@ -28,6 +29,22 @@ export class BillingPaymentDto {
   @ValidateIf((o) => o.paymentDate != null)
   @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: '入金日はYYYY-MM-DD形式で指定してください' })
   paymentDate!: string | null;
+}
+
+export class BillingCloseDto {
+  @IsString()
+  @MinLength(1)
+  facilityId!: string;
+
+  @IsInt()
+  @Min(2000)
+  @Max(2100)
+  year!: number;
+
+  @IsInt()
+  @Min(1)
+  @Max(12)
+  month!: number;
 }
 
 export class BillingNoteDto {
