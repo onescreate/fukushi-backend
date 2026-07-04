@@ -6,10 +6,15 @@ export class UpsertMealPricingDto {
   @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: '適用開始日はYYYY-MM-DD形式で指定してください' })
   effectiveDate!: string;
 
-  /** 食事料金（内税・円） */
+  /** 通常の食事料金（内税・円） */
   @IsInt()
   @Min(0)
   mealFee!: number;
+
+  /** 特別食事料金（補助なし等・内税・円） */
+  @IsInt()
+  @Min(0)
+  specialMealFee!: number;
 
   /** キャンセル料（内税・円） */
   @IsInt()

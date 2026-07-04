@@ -21,7 +21,6 @@ type UserForFee = {
   corporationId: string;
   facilityId: string;
   useSpecialMealFee: boolean;
-  specialMealFee: number;
 };
 
 @Injectable()
@@ -39,7 +38,6 @@ export class MealReservationService {
           corporationId: true,
           facilityId: true,
           useSpecialMealFee: true,
-          specialMealFee: true,
         },
       })
       .catch(() => null);
@@ -64,12 +62,11 @@ export class MealReservationService {
     return f?.mealChangeDeadlineDays ?? 14;
   }
 
-  /** 利用者×利用日の食事料金（税込）。特別料金優先、なければ店舗の履歴料金。 */
+  /** 利用者×利用日の食事料金（税込）。店舗の履歴料金から、利用者の区分で通常/特別を選ぶ。 */
   private async computeMealFee(
     user: UserForFee,
     mealDateStr: string,
   ): Promise<number> {
-    if (user.useSpecialMealFee) return user.specialMealFee;
     const pricing = await this.prisma.mealPricing.findFirst({
       where: {
         facilityId: user.facilityId,
@@ -77,7 +74,8 @@ export class MealReservationService {
       },
       orderBy: { effectiveDate: 'desc' },
     });
-    return pricing?.mealFee ?? 0;
+    if (!pricing) return 0;
+    return user.useSpecialMealFee ? pricing.specialMealFee : pricing.mealFee;
   }
 
   /** 店舗×利用日のキャンセル料（税込）。 */
@@ -150,7 +148,6 @@ export class MealReservationService {
         corporationId: true,
         facilityId: true,
         useSpecialMealFee: true,
-        specialMealFee: true,
       },
     });
     if (!user) throw new NotFoundException('利用者が見つかりません');

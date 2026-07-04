@@ -150,8 +150,7 @@ model User {
   kana           String?
   pinCode        String     @map("pin_code")
   certNumber     String?    @map("cert_number")
-  useSpecialMealFee Boolean @default(false) @map("use_special_meal_fee") // true=特別料金(special_meal_fee)を適用 / false=店舗の食事料金
-  specialMealFee Int        @default(0) @map("special_meal_fee")
+  useSpecialMealFee Boolean @default(false) @map("use_special_meal_fee") // true=店舗の特別食事料金 / false=店舗の通常食事料金
   heightCm       Decimal?   @map("height_cm") @db.Decimal(5, 2)
   status         UserStatus @default(active)
   createdAt      DateTime   @default(now()) @map("created_at")
@@ -364,7 +363,8 @@ model MealPricing {
   corporationId String   @map("corporation_id") @db.Uuid
   facilityId    String   @map("facility_id") @db.Uuid
   effectiveDate DateTime @map("effective_date") @db.Date // この日以降に適用
-  mealFee       Int      @default(0) @map("meal_fee") // 食事料金（内税・円）
+  mealFee       Int      @default(0) @map("meal_fee") // 通常の食事料金（内税・円）
+  specialMealFee Int     @default(0) @map("special_meal_fee") // 特別食事料金（補助なし等・内税・円）
   cancelFee     Int      @default(0) @map("cancel_fee") // キャンセル料（内税・円）
   createdBy     String?  @map("created_by") @db.Uuid
   updatedBy     String?  @map("updated_by") @db.Uuid

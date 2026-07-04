@@ -1,7 +1,6 @@
 import {
   IsBoolean,
   IsIn,
-  IsInt,
   IsNumber,
   IsOptional,
   IsString,
@@ -52,11 +51,6 @@ export class CreateUserDto {
   @IsOptional()
   @IsBoolean()
   useSpecialMealFee?: boolean;
-
-  @IsOptional()
-  @IsInt()
-  @Min(0)
-  specialMealFee?: number;
 
   @IsOptional()
   @IsNumber()

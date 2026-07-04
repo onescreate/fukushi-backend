@@ -28,6 +28,16 @@ export class BillingController {
     return this.service.list(principal, facilityId, year, month);
   }
 
+  @Get('detail')
+  detail(
+    @CurrentUser() principal: Principal,
+    @Query('userId') userId: string,
+    @Query('year', ParseIntPipe) year: number,
+    @Query('month', ParseIntPipe) month: number,
+  ) {
+    return this.service.detail(principal, userId, year, month);
+  }
+
   @RequirePermission('billing.payment')
   @Patch('payment')
   setPayment(

@@ -49,6 +49,7 @@ export class MealPricingService {
       facilityId: r.facilityId,
       effectiveDate: r.effectiveDate.toISOString().slice(0, 10),
       mealFee: r.mealFee,
+      specialMealFee: r.specialMealFee,
       cancelFee: r.cancelFee,
       isCurrent: r.id === currentId,
     }));
@@ -78,6 +79,7 @@ export class MealPricingService {
         facilityId,
         effectiveDate: new Date(dto.effectiveDate),
         mealFee: dto.mealFee,
+        specialMealFee: dto.specialMealFee,
         cancelFee: dto.cancelFee,
         createdBy: staffId,
         updatedBy: staffId,
@@ -115,6 +117,7 @@ export class MealPricingService {
       data: {
         effectiveDate: new Date(dto.effectiveDate),
         mealFee: dto.mealFee,
+        specialMealFee: dto.specialMealFee,
         cancelFee: dto.cancelFee,
         updatedBy: staffId,
       },

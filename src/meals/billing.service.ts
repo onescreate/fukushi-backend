@@ -145,6 +145,34 @@ export class BillingService {
     return { year, month, taxRate: tax?.rate ?? null, rows };
   }
 
+  /** 利用者×年月の食事明細（日別）。請求の内訳表示に使う。 */
+  async detail(
+    principal: Principal,
+    userId: string,
+    year: number,
+    month: number,
+  ) {
+    const scope = computeAccessScope(principal);
+    await this.userInScope(scope, userId);
+    const lastDay = new Date(year, month, 0).getDate();
+    const from = new Date(`${year}-${pad(month)}-01`);
+    const to = new Date(`${year}-${pad(month)}-${pad(lastDay)}`);
+    const meals = await this.prisma.meal.findMany({
+      where: {
+        userId,
+        approvalStatus: 'approved',
+        mealDate: { gte: from, lte: to },
+        status: { in: ['reserved', 'eaten', 'cancelled'] },
+      },
+      orderBy: { mealDate: 'asc' },
+    });
+    return meals.map((m) => ({
+      mealDate: m.mealDate.toISOString().slice(0, 10),
+      status: m.status,
+      amount: m.amount,
+    }));
+  }
+
   private async upsertRecord(
     principal: Principal,
     userId: string,
