@@ -93,6 +93,7 @@ model Facility {
   kioskDevices      KioskDevice[]
   attendanceSetting AttendanceSetting?
   mealPricings      MealPricing[]
+  invoiceSettings   InvoiceSetting[]
 
   @@index([corporationId])
   @@map("facilities")
@@ -397,6 +398,30 @@ model TaxSetting {
   @@unique([corporationId, category, effectiveDate])
   @@index([corporationId, effectiveDate])
   @@map("tax_settings")
+}
+
+/// 適格請求書の発行者情報（店舗ごと・適用開始日つきの履歴型）。
+model InvoiceSetting {
+  id                 String   @id @default(uuid()) @db.Uuid
+  corporationId      String   @map("corporation_id") @db.Uuid
+  facilityId         String   @map("facility_id") @db.Uuid
+  effectiveDate      DateTime @map("effective_date") @db.Date // この日以降に適用
+  issuerName         String   @map("issuer_name") // 発行者（事業者名）
+  registrationNumber String?  @map("registration_number") // 適格請求書発行事業者登録番号（T+13桁）
+  postalCode         String?  @map("postal_code")
+  address            String? // 住所（1行）
+  phone              String?
+  bankInfo           String?  @map("bank_info") // 振込先（自由記入・複数行可）
+  createdBy          String?  @map("created_by") @db.Uuid
+  updatedBy          String?  @map("updated_by") @db.Uuid
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  facility Facility @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+
+  @@unique([facilityId, effectiveDate])
+  @@index([facilityId, effectiveDate])
+  @@map("invoice_settings")
 }
 
 /// 食事の月次請求（利用者×年月で1件）。入金状況を管理する。

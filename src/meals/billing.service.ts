@@ -97,18 +97,26 @@ export class BillingService {
       userName: string;
       mealCount: number;
       mealTotal: number;
+      cancelCount: number;
       cancelTotal: number;
     };
     const byUser = new Map<string, Agg>();
     for (const m of meals) {
       const a =
         byUser.get(m.userId) ??
-        { userName: `${m.user.lastName} ${m.user.firstName}`, mealCount: 0, mealTotal: 0, cancelTotal: 0 };
+        {
+          userName: `${m.user.lastName} ${m.user.firstName}`,
+          mealCount: 0,
+          mealTotal: 0,
+          cancelCount: 0,
+          cancelTotal: 0,
+        };
       if (m.status === 'reserved' || m.status === 'eaten') {
         a.mealTotal += m.amount;
         a.mealCount += 1;
       } else if (m.status === 'cancelled') {
         a.cancelTotal += m.amount;
+        a.cancelCount += 1;
       }
       byUser.set(m.userId, a);
     }
@@ -130,6 +138,7 @@ export class BillingService {
         userName: a.userName,
         mealCount: a.mealCount,
         mealTotal: a.mealTotal,
+        cancelCount: a.cancelCount,
         cancelTotal: a.cancelTotal,
         total, // 税込
         taxAmount, // 内消費税額

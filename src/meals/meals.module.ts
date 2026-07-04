@@ -8,6 +8,8 @@ import { MyMealsController } from './my-meals.controller';
 import { MealReservationService } from './meal-reservation.service';
 import { BillingController } from './billing.controller';
 import { BillingService } from './billing.service';
+import { InvoiceSettingController } from './invoice-setting.controller';
+import { InvoiceSettingService } from './invoice-setting.service';
 
 @Module({
   controllers: [
@@ -16,12 +18,14 @@ import { BillingService } from './billing.service';
     MealReservationController,
     MyMealsController,
     BillingController,
+    InvoiceSettingController,
   ],
   providers: [
     MealPricingService,
     TaxSettingService,
     MealReservationService,
     BillingService,
+    InvoiceSettingService,
   ],
   exports: [MealPricingService, TaxSettingService, MealReservationService],
 })
