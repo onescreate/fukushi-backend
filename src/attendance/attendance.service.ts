@@ -214,6 +214,103 @@ export class AttendanceService {
     return rows;
   }
 
+  /** 打刻データ一覧（店舗×年月の予定/実績を日別に一覧）。facilityId='all'で全店舗。 */
+  async monthlyList(
+    principal: Principal,
+    facilityId: string,
+    year: number,
+    month: number,
+  ) {
+    const facilityIds = await resolveFacilityIds(
+      this.prisma,
+      principal,
+      facilityId,
+    );
+    const allMode = facilityId === ALL_FACILITIES;
+    const facMap = new Map(
+      (
+        await this.prisma.facility.findMany({
+          where: { id: { in: facilityIds } },
+          select: { id: true, name: true },
+        })
+      ).map((f) => [f.id, f.name]),
+    );
+    const lastDay = new Date(year, month, 0).getDate();
+    const from = new Date(`${year}-${pad(month)}-01`);
+    const to = new Date(`${year}-${pad(month)}-${pad(lastDay)}`);
+    const todayStr = dateStr(jstNow());
+
+    const schedules = await this.prisma.schedule.findMany({
+      where: { facilityId: { in: facilityIds }, planDate: { gte: from, lte: to } },
+      include: { user: { select: { lastName: true, firstName: true } } },
+    });
+    const attendances = await this.prisma.attendance.findMany({
+      where: { facilityId: { in: facilityIds }, workDate: { gte: from, lte: to } },
+      include: { user: { select: { lastName: true, firstName: true } } },
+    });
+
+    type Row = {
+      key: string;
+      userId: string;
+      userName: string;
+      facilityName: string | null;
+      date: string;
+      planIn: string | null;
+      planOut: string | null;
+      actIn: string | null;
+      actOut: string | null;
+      status: 'present' | 'absent' | 'notyet';
+      reason: string | null;
+    };
+    const map = new Map<string, Row>();
+    for (const s of schedules) {
+      const date = s.planDate.toISOString().slice(0, 10);
+      const key = `${s.userId}|${date}`;
+      map.set(key, {
+        key,
+        userId: s.userId,
+        userName: `${s.user.lastName} ${s.user.firstName}`,
+        facilityName: allMode ? (facMap.get(s.facilityId) ?? '') : null,
+        date,
+        planIn: s.planIn ?? null,
+        planOut: s.planOut ?? null,
+        actIn: null,
+        actOut: null,
+        status: date < todayStr ? 'absent' : 'notyet',
+        reason: null,
+      });
+    }
+    for (const a of attendances) {
+      const date = a.workDate.toISOString().slice(0, 10);
+      const key = `${a.userId}|${date}`;
+      const base =
+        map.get(key) ??
+        ({
+          key,
+          userId: a.userId,
+          userName: `${a.user.lastName} ${a.user.firstName}`,
+          facilityName: allMode ? (facMap.get(a.facilityId) ?? '') : null,
+          date,
+          planIn: null,
+          planOut: null,
+          actIn: null,
+          actOut: null,
+          status: 'notyet',
+          reason: null,
+        } as Row);
+      base.actIn = a.clockIn ? toHHMM(jstNow(a.clockIn)) : null;
+      base.actOut = a.clockOut ? toHHMM(jstNow(a.clockOut)) : null;
+      base.status = a.clockIn ? 'present' : a.status === 'absent' ? 'absent' : base.status;
+      base.reason = a.absenceReason ?? a.lateReason ?? a.earlyLeaveReason ?? null;
+      map.set(key, base);
+    }
+    const rows = [...map.values()];
+    rows.sort(
+      (x, y) => x.date.localeCompare(y.date) || x.userName.localeCompare(y.userName, 'ja'),
+    );
+    return { year, month, allMode, rows };
+  }
+
   /** 管理側の手動補正（打刻時刻・欠席・理由） */
   async manualUpdate(principal: Principal, dto: ManualAttendanceDto) {
     const scope = computeAccessScope(principal);

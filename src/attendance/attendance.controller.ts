@@ -1,4 +1,11 @@
-import { Body, Controller, Get, Patch, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  ParseIntPipe,
+  Patch,
+  Query,
+} from '@nestjs/common';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { Principal } from '../auth/principal.types';
 import { RequirePermission } from '../auth/require-permission.decorator';
@@ -18,6 +25,17 @@ export class AttendanceController {
     @Query('date') date: string,
   ) {
     return this.service.roster(principal, facilityId, date);
+  }
+
+  /** 打刻データ一覧（店舗×年月） */
+  @Get('list')
+  list(
+    @CurrentUser() principal: Principal,
+    @Query('facilityId') facilityId: string,
+    @Query('year', ParseIntPipe) year: number,
+    @Query('month', ParseIntPipe) month: number,
+  ) {
+    return this.service.monthlyList(principal, facilityId, year, month);
   }
 
   /** 手動補正 */
