@@ -53,20 +53,26 @@ export class MealReservationService {
     return user;
   }
 
-  /** 店舗の締切日数（食事設定）を取得。 */
-  private async facilityDeadlineDays(facilityId: string): Promise<number> {
+  /** 店舗の食事設定（食事提供フラグ・締切日数）を取得。 */
+  private async facilityMealInfo(facilityId: string) {
     const f = await this.prisma.facility.findUnique({
       where: { id: facilityId },
-      select: { mealChangeDeadlineDays: true },
+      select: { mealsEnabled: true, mealChangeDeadlineDays: true },
     });
-    return f?.mealChangeDeadlineDays ?? 14;
+    return {
+      mealsEnabled: f?.mealsEnabled ?? false,
+      deadlineDays: f?.mealChangeDeadlineDays ?? 14,
+    };
   }
 
-  /** 利用者×利用日の食事料金（税込）。店舗の履歴料金から、利用者の区分で通常/特別を選ぶ。 */
+  /**
+   * 利用者×利用日の食事料金（税込）。店舗の履歴料金から、利用者の区分で通常/特別を選ぶ。
+   * 適用可能な料金が未登録なら null（＝予約不可）。
+   */
   private async computeMealFee(
     user: UserForFee,
     mealDateStr: string,
-  ): Promise<number> {
+  ): Promise<number | null> {
     const pricing = await this.prisma.mealPricing.findFirst({
       where: {
         facilityId: user.facilityId,
@@ -74,20 +80,20 @@ export class MealReservationService {
       },
       orderBy: { effectiveDate: 'desc' },
     });
-    if (!pricing) return 0;
+    if (!pricing) return null;
     return user.useSpecialMealFee ? pricing.specialMealFee : pricing.mealFee;
   }
 
-  /** 店舗×利用日のキャンセル料（税込）。 */
+  /** 店舗×利用日のキャンセル料（税込）。未登録なら null。 */
   private async computeCancelFee(
     facilityId: string,
     mealDateStr: string,
-  ): Promise<number> {
+  ): Promise<number | null> {
     const pricing = await this.prisma.mealPricing.findFirst({
       where: { facilityId, effectiveDate: { lte: new Date(mealDateStr) } },
       orderBy: { effectiveDate: 'desc' },
     });
-    return pricing?.cancelFee ?? 0;
+    return pricing ? pricing.cancelFee : null;
   }
 
   /** その利用者に、対象日の承認済み通所予定があるか。 */
@@ -151,7 +157,12 @@ export class MealReservationService {
       },
     });
     if (!user) throw new NotFoundException('利用者が見つかりません');
-    const deadlineDays = await this.facilityDeadlineDays(user.facilityId);
+    const { mealsEnabled, deadlineDays } = await this.facilityMealInfo(
+      user.facilityId,
+    );
+    if (!mealsEnabled) {
+      throw new BadRequestException('この店舗では食事の予約はできません');
+    }
 
     const result = {
       reserved: 0, // 即確定した予約
@@ -198,6 +209,10 @@ export class MealReservationService {
         }
         // 却下済み/取消済み/新規 → 予約申請または即確定
         const fee = await this.computeMealFee(user, date);
+        if (fee === null) {
+          result.skipped.push({ date, reason: '食事料金が未設定です' });
+          continue;
+        }
         const isFree = window === 'free';
         await this.prisma.meal.upsert({
           where: {
@@ -316,15 +331,31 @@ export class MealReservationService {
   async adminUpsert(principal: Principal, dto: AdminMealDto) {
     const scope = computeAccessScope(principal);
     const user = await this.userInScope(scope, dto.userId);
+    const { mealsEnabled } = await this.facilityMealInfo(user.facilityId);
+    if (!mealsEnabled) {
+      throw new BadRequestException('この店舗では食事機能が無効です');
+    }
     if (dto.status === 'reserved' && !(await this.hasSchedule(dto.userId, dto.date))) {
       throw new BadRequestException('通所予定がない日は予約できません');
     }
     // 金額: 予約/喫食済=食事料金、キャンセル=キャンセル料、取消=0
     let amount = 0;
     if (dto.status === 'reserved' || dto.status === 'eaten') {
-      amount = await this.computeMealFee(user, dto.date);
+      const fee = await this.computeMealFee(user, dto.date);
+      if (fee === null) {
+        throw new BadRequestException(
+          '食事料金が未設定です。先に食事料金を登録してください',
+        );
+      }
+      amount = fee;
     } else if (dto.status === 'cancelled') {
-      amount = await this.computeCancelFee(user.facilityId, dto.date);
+      const fee = await this.computeCancelFee(user.facilityId, dto.date);
+      if (fee === null) {
+        throw new BadRequestException(
+          'キャンセル料が未設定です。先に食事料金を登録してください',
+        );
+      }
+      amount = fee;
     }
     const meal = await this.prisma.meal.upsert({
       where: {
@@ -427,7 +458,7 @@ export class MealReservationService {
             data: {
               ...base,
               status: 'cancelled',
-              amount: fee,
+              amount: fee ?? 0,
               approvalStatus: 'approved',
             },
           }),

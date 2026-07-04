@@ -132,20 +132,21 @@ export class BillingService {
       .filter(([, a]) => a.mealCount > 0 || a.cancelCount > 0)
       .map(([userId, a]) => {
       const total = a.mealTotal + a.cancelTotal;
+      // 消費税は食事料金(mealTotal・内税)のみが対象。キャンセル料は不課税（税抜扱い）。
       const taxAmount = tax
-        ? computeTax(total, tax.rate, tax.priceIncludesTax, tax.rounding)
+        ? computeTax(a.mealTotal, tax.rate, tax.priceIncludesTax, tax.rounding)
         : 0;
       const rec = recByUser.get(userId);
       return {
         userId,
         userName: a.userName,
         mealCount: a.mealCount,
-        mealTotal: a.mealTotal,
+        mealTotal: a.mealTotal, // 食事料金（税込・8%対象）
         cancelCount: a.cancelCount,
-        cancelTotal: a.cancelTotal,
-        total, // 税込
-        taxAmount, // 内消費税額
-        subtotal: total - taxAmount, // 税抜
+        cancelTotal: a.cancelTotal, // キャンセル料（不課税）
+        total, // 総額
+        taxAmount, // 消費税（食事のみ）
+        subtotal: a.mealTotal - taxAmount, // 8%対象の税抜
         taxRate: tax?.rate ?? null,
         paymentDate: rec?.paymentDate
           ? rec.paymentDate.toISOString().slice(0, 10)
