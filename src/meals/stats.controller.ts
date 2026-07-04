@@ -19,4 +19,9 @@ export class StatsController {
   ) {
     return this.service.facilitySummary(principal, facilityId, year, month);
   }
+
+  @Get('badges')
+  badges(@CurrentUser() principal: Principal) {
+    return this.service.badges(principal);
+  }
 }

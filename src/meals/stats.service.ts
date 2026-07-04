@@ -111,4 +111,66 @@ export class StatsService {
       billing,
     };
   }
+
+  /** principal がアクセスできる店舗IDの一覧。 */
+  private async accessibleFacilityIds(principal: Principal): Promise<string[]> {
+    const scope = computeAccessScope(principal);
+    if (scope.crossTenant) {
+      const fs = await this.prisma.facility.findMany({ select: { id: true } });
+      return fs.map((f) => f.id);
+    }
+    if (scope.allFacilitiesInCorporation) {
+      const fs = await this.prisma.facility.findMany({
+        where: { corporationId: scope.corporationId ?? '__none__' },
+        select: { id: true },
+      });
+      return fs.map((f) => f.id);
+    }
+    return scope.facilityIds;
+  }
+
+  /** サイドバー通知バッジ用の件数（未入金・当日の納品未登録）。 */
+  async badges(principal: Principal) {
+    const perms = getPermissionsForPrincipal(principal);
+    const facilityIds = await this.accessibleFacilityIds(principal);
+    const jst = new Date(
+      new Date().toLocaleString('en-US', { timeZone: 'Asia/Tokyo' }),
+    );
+    const year = jst.getFullYear();
+    const month = jst.getMonth() + 1;
+    const todayStr = `${year}-${pad(month)}-${pad(jst.getDate())}`;
+
+    let unpaid = 0;
+    if (perms.has('billing.view')) {
+      for (const fid of facilityIds) {
+        const b = await this.billing.list(principal, fid, year, month);
+        unpaid += b.rows.filter((r) => !r.paymentDate).length;
+      }
+    }
+
+    let deliveryMissing = 0;
+    if (perms.has('meal.delivery.manage')) {
+      const today = new Date(todayStr);
+      for (const fid of facilityIds) {
+        const orders = await this.prisma.meal.count({
+          where: {
+            facilityId: fid,
+            approvalStatus: 'approved',
+            status: { in: ['reserved', 'eaten'] },
+            mealDate: today,
+          },
+        });
+        if (orders > 0) {
+          const del = await this.prisma.mealDelivery.findUnique({
+            where: {
+              facilityId_deliveryDate: { facilityId: fid, deliveryDate: today },
+            },
+          });
+          if (!del) deliveryMissing++;
+        }
+      }
+    }
+
+    return { unpaid, deliveryMissing };
+  }
 }
