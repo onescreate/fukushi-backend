@@ -94,6 +94,7 @@ model Facility {
   attendanceSetting AttendanceSetting?
   mealPricings      MealPricing[]
   invoiceSettings   InvoiceSetting[]
+  mealDeliveries    MealDelivery[]
 
   @@index([corporationId])
   @@map("facilities")
@@ -398,6 +399,26 @@ model TaxSetting {
   @@unique([corporationId, category, effectiveDate])
   @@index([corporationId, effectiveDate])
   @@map("tax_settings")
+}
+
+/// 食事の納品（店舗×日で1件）。発注数は meals から都度集計するため保持しない。
+model MealDelivery {
+  id            String   @id @default(uuid()) @db.Uuid
+  corporationId String   @map("corporation_id") @db.Uuid
+  facilityId    String   @map("facility_id") @db.Uuid
+  deliveryDate  DateTime @map("delivery_date") @db.Date
+  deliveryCount Int      @default(0) @map("delivery_count") // 実納品数（手入力）
+  note          String?
+  createdBy     String?  @map("created_by") @db.Uuid
+  updatedBy     String?  @map("updated_by") @db.Uuid
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  facility Facility @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+
+  @@unique([facilityId, deliveryDate])
+  @@index([facilityId, deliveryDate])
+  @@map("meal_deliveries")
 }
 
 /// 適格請求書の発行者情報（店舗ごと・適用開始日つきの履歴型）。
