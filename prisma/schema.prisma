@@ -166,6 +166,8 @@ model User {
   attendances    Attendance[]
   meals          Meal[]
   billingRecords BillingRecord[]
+  healthRecords  HealthRecord[]
+  closingOps     ClosingOperation[]
 
   @@index([corporationId])
   @@index([facilityId])
@@ -469,6 +471,52 @@ model BillingRecord {
   @@unique([userId, year, month])
   @@index([facilityId, year, month])
   @@map("billing_records")
+}
+
+/// 健康記録（利用者×年月で1件。体重・身長・BMI用）
+model HealthRecord {
+  id            String    @id @default(uuid()) @db.Uuid
+  corporationId String    @map("corporation_id") @db.Uuid
+  facilityId    String    @map("facility_id") @db.Uuid
+  userId        String    @map("user_id") @db.Uuid
+  year          Int
+  month         Int // 1-12
+  weightKg      Decimal?  @map("weight_kg") @db.Decimal(5, 2)
+  heightCm      Decimal?  @map("height_cm") @db.Decimal(5, 2)
+  note          String?
+  measuredOn    DateTime? @map("measured_on") @db.Date // 最終測定日
+  createdBy     String?   @map("created_by") @db.Uuid
+  updatedBy     String?   @map("updated_by") @db.Uuid
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, year, month])
+  @@index([facilityId, year, month])
+  @@map("health_records")
+}
+
+/// 締め業務（実績記録・加算）。利用者×日で1件。食事提供加算は喫食実績から導出。
+model ClosingOperation {
+  id                  String   @id @default(uuid()) @db.Uuid
+  corporationId       String   @map("corporation_id") @db.Uuid
+  facilityId          String   @map("facility_id") @db.Uuid
+  userId              String   @map("user_id") @db.Uuid
+  targetDate          DateTime @map("target_date") @db.Date
+  regionalCooperation Boolean  @default(false) @map("regional_cooperation") // 地域連携会議加算
+  transitionPrep      Boolean  @default(false) @map("transition_prep") // 移行準備支援加算
+  absenceHandling     Boolean  @default(false) @map("absence_handling") // 欠席時対応加算
+  createdBy           String?  @map("created_by") @db.Uuid
+  updatedBy           String?  @map("updated_by") @db.Uuid
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, targetDate])
+  @@index([facilityId, targetDate])
+  @@map("closing_operations")
 }
 
 /// お知らせの配信対象

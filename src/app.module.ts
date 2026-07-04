@@ -14,6 +14,8 @@ import { SchedulesModule } from './schedules/schedules.module';
 import { AttendanceModule } from './attendance/attendance.module';
 import { MealsModule } from './meals/meals.module';
 import { AnnouncementsModule } from './announcements/announcements.module';
+import { HealthRecordsModule } from './health-records/health-records.module';
+import { ClosingOperationsModule } from './closing-operations/closing-operations.module';
 import { KioskModule } from './kiosk/kiosk.module';
 import { PostalModule } from './postal/postal.module';
 import { HealthModule } from './health/health.module';
@@ -33,6 +35,8 @@ import { HealthModule } from './health/health.module';
     AttendanceModule,
     MealsModule,
     AnnouncementsModule,
+    HealthRecordsModule,
+    ClosingOperationsModule,
     KioskModule,
     PostalModule,
     HealthModule,
