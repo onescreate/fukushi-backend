@@ -16,15 +16,9 @@ import {
 } from '../common/facility-scope';
 import { UpdateAttendanceSettingsDto } from './dto/attendance-settings.dto';
 import { ManualAttendanceDto } from './dto/manual-attendance.dto';
+import { isLateArrival, isEarlyDeparture } from './attendance-rules';
 
-import {
-  pad,
-  jstNow,
-  dateStr,
-  toHHMM,
-  minutesOfDay,
-  parseHHMM,
-} from '../common/date';
+import { pad, jstNow, dateStr, toHHMM, minutesOfDay } from '../common/date';
 
 @Injectable()
 export class AttendanceService {
@@ -597,13 +591,10 @@ export class AttendanceService {
         autoScheduled = true;
       }
 
-      let isLate = false;
-      if (schedule.status === 'approved' && schedule.planIn) {
-        const pin = parseHHMM(schedule.planIn);
-        if (pin !== null && nowMin > pin + settings.lateGraceMinutes) {
-          isLate = true;
-        }
-      }
+      const isLate =
+        schedule.status === 'approved'
+          ? isLateArrival(schedule.planIn, nowMin, settings.lateGraceMinutes)
+          : false;
 
       const att = await this.prisma.attendance.upsert({
         where: { userId_workDate: { userId, workDate } },
@@ -643,13 +634,14 @@ export class AttendanceService {
       };
     }
 
-    let isEarlyLeave = false;
-    if (schedule && schedule.status === 'approved' && schedule.planOut) {
-      const pout = parseHHMM(schedule.planOut);
-      if (pout !== null && nowMin < pout - settings.earlyLeaveGraceMinutes) {
-        isEarlyLeave = true;
-      }
-    }
+    const isEarlyLeave =
+      schedule && schedule.status === 'approved'
+        ? isEarlyDeparture(
+            schedule.planOut,
+            nowMin,
+            settings.earlyLeaveGraceMinutes,
+          )
+        : false;
     const att = await this.prisma.attendance.upsert({
       where: { userId_workDate: { userId, workDate } },
       create: {
