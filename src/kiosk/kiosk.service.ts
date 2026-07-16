@@ -18,9 +18,7 @@ import {
 } from '../auth/access-scope';
 import { Principal } from '../auth/principal.types';
 import { CreateDeviceDto } from './dto/create-device.dto';
-
-const MAX_ATTEMPTS = 5;
-const LOCK_MS = 60_000;
+import { isPinLocked, recordPinFailure } from './kiosk-lockout';
 
 function hashToken(raw: string): string {
   return createHash('sha256').update(raw).digest('hex');
@@ -33,8 +31,7 @@ export class KioskService {
     private readonly attendance: AttendanceService,
   ) {}
 
-  // PIN試行回数の簡易制限（利用者ID単位・メモリ内）
-  private attempts = new Map<string, { count: number; until: number }>();
+  // PIN試行回数の制限はDB(kiosk_pin_attempts)で永続管理する（複数インスタンス間で有効）。
 
   // ---------- 端末管理（管理者） ----------
 
@@ -138,26 +135,32 @@ export class KioskService {
   async authenticate(deviceToken: string, userId: string, pin: string) {
     const device = await this.deviceByToken(deviceToken);
 
-    // 試行回数の制限（ロック中は弾く）
-    const lock = this.attempts.get(userId);
-    if (lock && lock.until > Date.now()) {
+    // 試行回数の制限（ロック中は弾く）。DBで永続管理（複数インスタンス間で有効）。
+    const facilityId = device.facilityId;
+    const attempt = await this.prisma.kioskPinAttempt.findUnique({
+      where: { facilityId_userId: { facilityId, userId } },
+    });
+    if (isPinLocked(attempt, new Date())) {
       throw new UnauthorizedException(
         'PINの入力回数が上限を超えました。しばらく待ってから再度お試しください。',
       );
     }
 
     const user = await this.prisma.user.findFirst({
-      where: { id: userId, facilityId: device.facilityId, status: 'active' },
+      where: { id: userId, facilityId, status: 'active' },
       select: { id: true, pinCode: true, lastName: true, firstName: true },
     });
 
     const ok = user ? await bcrypt.compare(pin, user.pinCode) : false;
     if (!user || !ok) {
-      this.recordFailure(userId);
+      await this.recordFailure(facilityId, userId, attempt);
       throw new UnauthorizedException('PINが正しくありません');
     }
 
-    this.attempts.delete(userId);
+    // 成功したら失敗記録をクリア
+    await this.prisma.kioskPinAttempt
+      .deleteMany({ where: { facilityId, userId } })
+      .catch(() => undefined);
     void this.prisma.kioskDevice
       .update({ where: { id: device.id }, data: { lastUsedAt: new Date() } })
       .catch(() => undefined);
@@ -236,12 +239,21 @@ export class KioskService {
     return this.attendance.submitReason(userId, date, kind, reason);
   }
 
-  private recordFailure(userId: string) {
-    const cur = this.attempts.get(userId);
-    const count = (cur?.count ?? 0) + 1;
-    this.attempts.set(userId, {
-      count,
-      until: count >= MAX_ATTEMPTS ? Date.now() + LOCK_MS : 0,
+  /** PIN失敗をDBに記録する（純粋ロジックで次状態を計算し、upsertで永続化）。 */
+  private async recordFailure(
+    facilityId: string,
+    userId: string,
+    current: {
+      failCount: number;
+      firstFailAt: Date | null;
+      lockedUntil: Date | null;
+    } | null,
+  ) {
+    const next = recordPinFailure(current, new Date());
+    await this.prisma.kioskPinAttempt.upsert({
+      where: { facilityId_userId: { facilityId, userId } },
+      create: { facilityId, userId, ...next },
+      update: next,
     });
   }
 }
