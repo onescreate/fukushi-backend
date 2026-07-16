@@ -171,11 +171,14 @@ export class BillingService {
       select: { id: true, name: true, corporationId: true },
     });
 
-    const closing = allMode
-      ? null
-      : await this.prisma.billingClosing.findUnique({
-          where: this.closingKey(facilityId, year, month),
-        });
+    // 対象店舗の締め状況をまとめて取得（全店舗ビューでも店舗ごとに判定する）。
+    const closings = await this.prisma.billingClosing.findMany({
+      where: { facilityId: { in: facilityIds }, year, month },
+    });
+    const closingByFacility = new Map(
+      closings.map((c) => [c.facilityId, c] as const),
+    );
+
     const records = await this.prisma.billingRecord.findMany({
       where: { facilityId: { in: facilityIds }, year, month },
     });
@@ -184,15 +187,18 @@ export class BillingService {
     type AmountRow = Awaited<ReturnType<BillingService['aggregate']>>[number] & {
       facilityName?: string | null;
     };
-    let baseRows: AmountRow[];
-    if (closing) {
-      // スナップショット(JSON)は無検証キャストせず、parseBillingSnapshot で検証・補正する。
-      baseRows = records
-        .map((r) => parseBillingSnapshot(r.closedSnapshot))
-        .filter((r): r is AmountRow => r !== null);
-    } else {
-      baseRows = [];
-      for (const f of facilities) {
+    // 店舗ごとに: 締め済み→確定スナップショット / 未締め→ライブ集計。
+    // これにより全店舗ビューでも締め済み月は確定額で表示され、単店舗ビューと一致する。
+    const baseRows: AmountRow[] = [];
+    for (const f of facilities) {
+      if (closingByFacility.has(f.id)) {
+        const snaps = records
+          .filter((r) => r.facilityId === f.id)
+          .map((r) => parseBillingSnapshot(r.closedSnapshot))
+          .filter((r): r is AmountRow => r !== null)
+          .map((r) => (allMode ? { ...r, facilityName: f.name } : r));
+        baseRows.push(...snaps);
+      } else {
         const fr = await this.aggregate(f.corporationId, f.id, year, month);
         baseRows.push(
           ...fr.map((r) => (allMode ? { ...r, facilityName: f.name } : r)),
@@ -212,12 +218,20 @@ export class BillingService {
       };
     });
     rows.sort((x, y) => x.userName.localeCompare(y.userName, 'ja'));
+    // 単店舗: その店舗が締め済みか。全店舗: 表示中の全店舗が締め済みなら closed とみなす。
+    const closed = allMode
+      ? facilities.length > 0 &&
+        facilities.every((f) => closingByFacility.has(f.id))
+      : closingByFacility.has(facilityId);
+    const closedAt = allMode
+      ? null
+      : (closingByFacility.get(facilityId)?.closedAt.toISOString() ?? null);
     return {
       year,
       month,
       taxRate: rows[0]?.taxRate ?? null,
-      closed: !!closing,
-      closedAt: closing?.closedAt.toISOString() ?? null,
+      closed,
+      closedAt,
       allMode,
       rows,
     };
