@@ -16,26 +16,14 @@ import {
 import { UpdateAttendanceSettingsDto } from './dto/attendance-settings.dto';
 import { ManualAttendanceDto } from './dto/manual-attendance.dto';
 
-const pad = (n: number) => String(n).padStart(2, '0');
-
-/** 現在時刻をJSTの壁時計として扱う */
-function jstNow(now = new Date()): Date {
-  return new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Tokyo' }));
-}
-function dateStr(d: Date): string {
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-function minutesOfDay(d: Date): number {
-  return d.getHours() * 60 + d.getMinutes();
-}
-function toHHMM(d: Date): string {
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-function parseHHMM(s: string): number | null {
-  const m = /^(\d{1,2}):(\d{2})$/.exec(s);
-  if (!m) return null;
-  return Number(m[1]) * 60 + Number(m[2]);
-}
+import {
+  pad,
+  jstNow,
+  dateStr,
+  toHHMM,
+  minutesOfDay,
+  parseHHMM,
+} from '../common/date';
 
 @Injectable()
 export class AttendanceService {

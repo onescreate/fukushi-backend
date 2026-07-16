@@ -10,6 +10,7 @@ import {
   resolveFacilityIds,
 } from '../common/facility-scope';
 import { SaveClosingOperationDto } from './dto/closing-operation.dto';
+import { jstHHMM } from '../common/date';
 
 @Injectable()
 export class ClosingOperationsService {
@@ -61,12 +62,7 @@ export class ClosingOperationsService {
     const mealSet = new Set(meals.map((m) => m.userId));
     const opByUser = new Map(ops.map((o) => [o.userId, o]));
 
-    const toHHMM = (d: Date | null) =>
-      d
-        ? new Date(d.toLocaleString('en-US', { timeZone: 'Asia/Tokyo' }))
-            .toTimeString()
-            .slice(0, 5)
-        : null;
+    const toHHMM = (d: Date | null) => (d ? jstHHMM(d) : null);
 
     const rows = schedules.map((s) => {
       const a = attByUser.get(s.userId);

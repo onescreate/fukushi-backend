@@ -14,8 +14,7 @@ import {
   resolveFacilityIds,
 } from '../common/facility-scope';
 import { UpsertHealthRecordDto } from './dto/health-record.dto';
-
-const pad = (n: number) => String(n).padStart(2, '0');
+import { pad, jstNow } from '../common/date';
 
 /** BMI = 体重kg / (身長m)^2。小数第1位で丸める。 */
 function computeBmi(weightKg: number | null, heightCm: number | null) {
@@ -146,9 +145,7 @@ export class HealthRecordsService {
       principal,
       ALL_FACILITIES,
     );
-    const jst = new Date(
-      new Date().toLocaleString('en-US', { timeZone: 'Asia/Tokyo' }),
-    );
+    const jst = jstNow();
     const year = jst.getFullYear();
     const month = jst.getMonth() + 1;
     const [userCount, recs] = await Promise.all([

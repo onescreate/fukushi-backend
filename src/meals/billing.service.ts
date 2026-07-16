@@ -14,8 +14,8 @@ import { Principal } from '../auth/principal.types';
 import { ALL_FACILITIES, resolveFacilityIds } from '../common/facility-scope';
 import { computeTax } from './tax-util';
 import { parseBillingSnapshot } from './billing-snapshot';
+import { pad } from '../common/date';
 
-const pad = (n: number) => String(n).padStart(2, '0');
 
 @Injectable()
 export class BillingService {

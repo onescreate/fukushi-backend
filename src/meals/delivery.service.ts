@@ -11,7 +11,7 @@ import {
 import { Principal } from '../auth/principal.types';
 import { ALL_FACILITIES, resolveFacilityIds } from '../common/facility-scope';
 
-const pad = (n: number) => String(n).padStart(2, '0');
+import { pad } from '../common/date';
 
 @Injectable()
 export class DeliveryService {

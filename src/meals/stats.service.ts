@@ -5,8 +5,7 @@ import { getPermissionsForPrincipal } from '../auth/permissions';
 import { Principal } from '../auth/principal.types';
 import { resolveFacilityIds } from '../common/facility-scope';
 import { BillingService } from './billing.service';
-
-const pad = (n: number) => String(n).padStart(2, '0');
+import { pad, jstNow } from '../common/date';
 
 @Injectable()
 export class StatsService {
@@ -125,9 +124,7 @@ export class StatsService {
   async badges(principal: Principal) {
     const perms = getPermissionsForPrincipal(principal);
     const facilityIds = await this.accessibleFacilityIds(principal);
-    const jst = new Date(
-      new Date().toLocaleString('en-US', { timeZone: 'Asia/Tokyo' }),
-    );
+    const jst = jstNow();
     const year = jst.getFullYear();
     const month = jst.getMonth() + 1;
     const todayStr = `${year}-${pad(month)}-${pad(jst.getDate())}`;

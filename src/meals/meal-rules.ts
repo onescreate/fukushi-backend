@@ -8,12 +8,11 @@
  *
  * すべて日本時間(JST)基準で判定する。
  */
-export type MealWindow = 'free' | 'application' | 'closed';
+import { jstNow } from '../common/date';
 
-/** 現在時刻をJSTの壁時計として扱う。 */
-export function jstNow(now: Date = new Date()): Date {
-  return new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Tokyo' }));
-}
+export { jstNow }; // 後方互換（従来 meal-rules 経由で jstNow を参照している箇所向け）
+
+export type MealWindow = 'free' | 'application' | 'closed';
 
 export function classifyMealWindow(
   mealDateStr: string, // "YYYY-MM-DD"

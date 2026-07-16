@@ -6,6 +6,8 @@
  *
  * 日本時間(JST)基準で判定する。
  */
+import { jstNow } from '../common/date';
+
 export function computeAutoApproveStatus(
   planDateStr: string, // "YYYY-MM-DD"
   now: Date = new Date(),
@@ -13,7 +15,7 @@ export function computeAutoApproveStatus(
   const [py, pm] = planDateStr.split('-').map(Number); // 年, 月(1-12)
 
   // 現在日時をJSTの壁時計に変換
-  const jst = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Tokyo' }));
+  const jst = jstNow(now);
   const ny = jst.getFullYear();
   const nm = jst.getMonth() + 1;
   const nd = jst.getDate();
