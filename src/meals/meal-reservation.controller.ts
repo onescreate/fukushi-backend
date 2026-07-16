@@ -12,6 +12,7 @@ import { Principal } from '../auth/principal.types';
 import { RequirePermission } from '../auth/require-permission.decorator';
 import { AdminMealDto } from './dto/admin-meal.dto';
 import { MealReservationService } from './meal-reservation.service';
+import { ParseYmdPipe } from '../common/parse-ymd.pipe';
 
 // 食事予約（管理側）。閲覧=meal.view、操作/承認=meal.manage。
 @RequirePermission('meal.view')
@@ -35,8 +36,8 @@ export class MealReservationController {
   list(
     @CurrentUser() principal: Principal,
     @Query('facilityId') facilityId: string,
-    @Query('from') from: string,
-    @Query('to') to: string,
+    @Query('from', ParseYmdPipe) from: string,
+    @Query('to', ParseYmdPipe) to: string,
   ) {
     return this.service.list(principal, facilityId, from, to);
   }

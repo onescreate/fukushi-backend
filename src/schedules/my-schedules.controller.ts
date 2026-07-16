@@ -10,6 +10,7 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import { Principal } from '../auth/principal.types';
 import { MySubmitScheduleDto } from './dto/my-submit-schedule.dto';
 import { SchedulesService } from './schedules.service';
+import { ParseYmdPipe } from '../common/parse-ymd.pipe';
 
 // 利用者本人用。ログインしていれば利用可（権限は不要だが、利用者のみ）。
 @Controller('my/schedules')
@@ -26,8 +27,8 @@ export class MySchedulesController {
   @Get()
   list(
     @CurrentUser() principal: Principal,
-    @Query('from') from: string,
-    @Query('to') to: string,
+    @Query('from', ParseYmdPipe) from: string,
+    @Query('to', ParseYmdPipe) to: string,
   ) {
     const user = this.asUser(principal);
     return this.service.myList(user.id, from, to);

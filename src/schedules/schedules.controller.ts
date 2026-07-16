@@ -16,6 +16,7 @@ import { UpdateScheduleDto } from './dto/update-schedule.dto';
 import { BulkScheduleDto } from './dto/bulk-schedule.dto';
 import { CreateScheduleDetailDto } from './dto/create-detail.dto';
 import { SchedulesService } from './schedules.service';
+import { ParseYmdPipe } from '../common/parse-ymd.pipe';
 
 @RequirePermission('schedule.view')
 @Controller('schedules')
@@ -26,8 +27,8 @@ export class SchedulesController {
   list(
     @CurrentUser() principal: Principal,
     @Query('userId') userId: string,
-    @Query('from') from: string,
-    @Query('to') to: string,
+    @Query('from', ParseYmdPipe) from: string,
+    @Query('to', ParseYmdPipe) to: string,
   ) {
     return this.service.list(principal, userId, from, to);
   }

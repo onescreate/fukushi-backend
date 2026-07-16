@@ -10,6 +10,7 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import { Principal } from '../auth/principal.types';
 import { MySubmitMealDto } from './dto/my-submit-meal.dto';
 import { MealReservationService } from './meal-reservation.service';
+import { ParseYmdPipe } from '../common/parse-ymd.pipe';
 
 // 利用者本人用。ログイン済み利用者のみ。
 @Controller('my/meals')
@@ -26,8 +27,8 @@ export class MyMealsController {
   @Get()
   list(
     @CurrentUser() principal: Principal,
-    @Query('from') from: string,
-    @Query('to') to: string,
+    @Query('from', ParseYmdPipe) from: string,
+    @Query('to', ParseYmdPipe) to: string,
   ) {
     const user = this.asUser(principal);
     return this.service.myList(user.id, from, to);

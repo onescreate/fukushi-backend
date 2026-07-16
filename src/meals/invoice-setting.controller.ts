@@ -13,6 +13,7 @@ import { Principal } from '../auth/principal.types';
 import { RequirePermission } from '../auth/require-permission.decorator';
 import { UpsertInvoiceSettingDto } from './dto/invoice-setting.dto';
 import { InvoiceSettingService } from './invoice-setting.service';
+import { ParseYmdPipe } from '../common/parse-ymd.pipe';
 
 // 適格請求書の発行者情報（店舗ごと・履歴型）。閲覧=billing.view、管理=billing.issue。
 @RequirePermission('billing.view')
@@ -24,7 +25,7 @@ export class InvoiceSettingController {
   active(
     @CurrentUser() principal: Principal,
     @Param('facilityId') facilityId: string,
-    @Query('date') date: string,
+    @Query('date', ParseYmdPipe) date: string,
   ) {
     return this.service.active(principal, facilityId, date);
   }

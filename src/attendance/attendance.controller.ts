@@ -11,6 +11,7 @@ import { Principal } from '../auth/principal.types';
 import { RequirePermission } from '../auth/require-permission.decorator';
 import { AttendanceService } from './attendance.service';
 import { ManualAttendanceDto } from './dto/manual-attendance.dto';
+import { ParseYmdPipe } from '../common/parse-ymd.pipe';
 
 @RequirePermission('attendance.view')
 @Controller('attendance')
@@ -22,7 +23,7 @@ export class AttendanceController {
   roster(
     @CurrentUser() principal: Principal,
     @Query('facilityId') facilityId: string,
-    @Query('date') date: string,
+    @Query('date', ParseYmdPipe) date: string,
   ) {
     return this.service.roster(principal, facilityId, date);
   }
