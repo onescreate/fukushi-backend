@@ -5,6 +5,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { FirebaseModule } from './firebase/firebase.module';
 import { AuthModule } from './auth/auth.module';
 import { AuthGuard } from './auth/auth.guard';
+import { TenantGuard } from './auth/tenant.guard';
 import { RbacGuard } from './auth/rbac.guard';
 import { CorporationsModule } from './corporations/corporations.module';
 import { FacilitiesModule } from './facilities/facilities.module';
@@ -42,8 +43,9 @@ import { HealthModule } from './health/health.module';
     HealthModule,
   ],
   providers: [
-    // 全エンドポイントに順に適用: ①認証 → ②権限
+    // 全エンドポイントに順に適用: ①認証 → ②テナント分離 → ③権限
     { provide: APP_GUARD, useClass: AuthGuard },
+    { provide: APP_GUARD, useClass: TenantGuard },
     { provide: APP_GUARD, useClass: RbacGuard },
   ],
 })
