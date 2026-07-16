@@ -23,16 +23,14 @@ export class HealthController {
   /**
    * DB疎通確認（GET /health/db）。
    * アプリからデータベースへ接続できるかを確認する。
+   * ※ 生存確認は @Public のため、テナント件数などの情報は返さない（情報漏えい防止・軽量化）。
    */
   @Get('db')
   async checkDb() {
     await this.prisma.$queryRaw`SELECT 1`;
-    const corporations = await this.prisma.corporation.count();
-    const users = await this.prisma.user.count();
     return {
       status: 'ok',
       database: 'connected',
-      counts: { corporations, users },
     };
   }
 }

@@ -162,10 +162,9 @@ export class KioskService {
       .update({ where: { id: device.id }, data: { lastUsedAt: new Date() } })
       .catch(() => undefined);
 
-    const secret = process.env.KIOSK_TOKEN_SECRET ?? '';
     const operationToken = jwt.sign(
       { sub: user.id, facilityId: device.facilityId, scope: 'kiosk' },
-      secret,
+      this.kioskSecret(),
       { expiresIn: '5m' },
     );
 
@@ -177,13 +176,24 @@ export class KioskService {
     };
   }
 
+  /**
+   * kiosk操作トークンの署名鍵を返す。未設定なら即エラーにする（fail-fast）。
+   * 空文字での署名/検証を許すと、誰でも有効なトークンを偽造できてしまうため。
+   */
+  private kioskSecret(): string {
+    const secret = process.env.KIOSK_TOKEN_SECRET;
+    if (!secret) {
+      throw new Error(
+        'KIOSK_TOKEN_SECRET が未設定です。kiosk操作トークンの署名鍵を環境変数に設定してください。',
+      );
+    }
+    return secret;
+  }
+
   /** 操作トークンを検証して利用者IDを取り出す */
   private verifyOperationToken(token: string): string {
     try {
-      const payload = jwt.verify(
-        token,
-        process.env.KIOSK_TOKEN_SECRET ?? '',
-      ) as jwt.JwtPayload;
+      const payload = jwt.verify(token, this.kioskSecret()) as jwt.JwtPayload;
       if (payload.scope !== 'kiosk' || typeof payload.sub !== 'string') {
         throw new Error('invalid');
       }
