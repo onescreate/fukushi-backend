@@ -3,6 +3,7 @@ import {
   ForbiddenException,
   Injectable,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   canAccessFacility,
@@ -428,27 +429,41 @@ export class AttendanceService {
       take: 60,
       select: { planDate: true },
     });
+    // N+1回避: 対象日の既存打刻をまとめて取得し、作成/更新もバッチで行う。
+    const existingForPast = await this.prisma.attendance.findMany({
+      where: { userId, workDate: { in: pastApproved.map((s) => s.planDate) } },
+    });
+    const pastAttByTime = new Map(
+      existingForPast.map((a) => [a.workDate.getTime(), a]),
+    );
+    const toCreateAbsent: Prisma.AttendanceCreateManyInput[] = [];
+    const toMarkAbsentIds: string[] = [];
     for (const s of pastApproved) {
-      const att = await this.prisma.attendance.findUnique({
-        where: { userId_workDate: { userId, workDate: s.planDate } },
-      });
+      const att = pastAttByTime.get(s.planDate.getTime());
       if (!att) {
-        await this.prisma.attendance.create({
-          data: {
-            corporationId: user.corporationId,
-            facilityId: user.facilityId,
-            userId,
-            workDate: s.planDate,
-            status: 'absent',
-            createdBy: userId,
-          },
+        toCreateAbsent.push({
+          corporationId: user.corporationId,
+          facilityId: user.facilityId,
+          userId,
+          workDate: s.planDate,
+          status: 'absent',
+          createdBy: userId,
         });
       } else if (!att.clockIn && att.status !== 'absent') {
-        await this.prisma.attendance.update({
-          where: { id: att.id },
-          data: { status: 'absent' },
-        });
+        toMarkAbsentIds.push(att.id);
       }
+    }
+    if (toCreateAbsent.length) {
+      await this.prisma.attendance.createMany({
+        data: toCreateAbsent,
+        skipDuplicates: true,
+      });
+    }
+    if (toMarkAbsentIds.length) {
+      await this.prisma.attendance.updateMany({
+        where: { id: { in: toMarkAbsentIds } },
+        data: { status: 'absent' },
+      });
     }
 
     // 理由未入力（欠席は過去のみ・遅刻/早退は当日も含む）
