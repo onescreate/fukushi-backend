@@ -13,6 +13,7 @@ import {
 import { Principal } from '../auth/principal.types';
 import { ALL_FACILITIES, resolveFacilityIds } from '../common/facility-scope';
 import { computeTax } from './tax-util';
+import { parseBillingSnapshot } from './billing-snapshot';
 
 const pad = (n: number) => String(n).padStart(2, '0');
 
@@ -185,9 +186,10 @@ export class BillingService {
     };
     let baseRows: AmountRow[];
     if (closing) {
+      // スナップショット(JSON)は無検証キャストせず、parseBillingSnapshot で検証・補正する。
       baseRows = records
-        .filter((r) => r.closedSnapshot)
-        .map((r) => r.closedSnapshot as unknown as AmountRow);
+        .map((r) => parseBillingSnapshot(r.closedSnapshot))
+        .filter((r): r is AmountRow => r !== null);
     } else {
       baseRows = [];
       for (const f of facilities) {
@@ -236,32 +238,36 @@ export class BillingService {
       month,
     );
     const staffId = principal.type === 'staff' ? principal.id : null;
-    for (const r of rows) {
-      await this.prisma.billingRecord.upsert({
-        where: { userId_year_month: { userId: r.userId, year, month } },
+    // 「全利用者のスナップショット保存」と「締めロック」を1つのトランザクションで原子的に実行する。
+    // 途中で失敗しても“一部だけ締まった”状態を残さない（金額整合を守る）。
+    await this.prisma.$transaction(async (tx) => {
+      for (const r of rows) {
+        await tx.billingRecord.upsert({
+          where: { userId_year_month: { userId: r.userId, year, month } },
+          create: {
+            corporationId: facility.corporationId,
+            facilityId,
+            userId: r.userId,
+            year,
+            month,
+            closedSnapshot: r,
+            createdBy: staffId,
+            updatedBy: staffId,
+          },
+          update: { closedSnapshot: r, updatedBy: staffId },
+        });
+      }
+      await tx.billingClosing.upsert({
+        where: this.closingKey(facilityId, year, month),
         create: {
           corporationId: facility.corporationId,
           facilityId,
-          userId: r.userId,
           year,
           month,
-          closedSnapshot: r,
-          createdBy: staffId,
-          updatedBy: staffId,
+          closedBy: staffId,
         },
-        update: { closedSnapshot: r, updatedBy: staffId },
+        update: { closedBy: staffId, closedAt: new Date() },
       });
-    }
-    await this.prisma.billingClosing.upsert({
-      where: this.closingKey(facilityId, year, month),
-      create: {
-        corporationId: facility.corporationId,
-        facilityId,
-        year,
-        month,
-        closedBy: staffId,
-      },
-      update: { closedBy: staffId, closedAt: new Date() },
     });
     return { ok: true };
   }
