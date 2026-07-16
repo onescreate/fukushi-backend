@@ -59,6 +59,10 @@ export class BillingService {
   ) {
     const lastDay = new Date(year, month, 0).getDate();
     const monthEnd = new Date(`${year}-${pad(month)}-${pad(lastDay)}`);
+    // 現状の請求対象は「食事代（食品=軽減8%・内税）」と「キャンセル料（非課税）」のみ。
+    // よってここでは軽減(reduced)の税設定を採用する（税率/内税/端数は設定値を使用）。
+    // ※将来、標準10%の課税品目（食事以外の物販・役務）を扱う場合は、
+    //   請求明細を品目化して「品目ごとの税区分(standard/reduced)」で集計する拡張が必要。
     return this.prisma.taxSetting.findFirst({
       where: {
         corporationId,
