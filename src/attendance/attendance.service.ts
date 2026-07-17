@@ -11,7 +11,6 @@ import {
 } from '../auth/access-scope';
 import { Principal } from '../auth/principal.types';
 import {
-  ALL_FACILITIES,
   resolveFacilityIds,
 } from '../common/facility-scope';
 import { UpdateAttendanceSettingsDto } from './dto/attendance-settings.dto';
@@ -103,7 +102,7 @@ export class AttendanceService {
       principal,
       facilityId,
     );
-    const allMode = facilityId === ALL_FACILITIES;
+    const allMode = facilityIds.length > 1; // 複数店舗のとき店舗名を表示
     const facMap = new Map(
       (
         await this.prisma.facility.findMany({
@@ -209,7 +208,7 @@ export class AttendanceService {
       principal,
       facilityId,
     );
-    const allMode = facilityId === ALL_FACILITIES;
+    const allMode = facilityIds.length > 1; // 複数店舗のとき店舗名を表示
     const facMap = new Map(
       (
         await this.prisma.facility.findMany({

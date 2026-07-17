@@ -10,8 +10,9 @@ export const ALL_FACILITIES = 'all';
 
 /**
  * facilityId パラメータを、実際にクエリする店舗IDの配列へ解決する。
- * - 'all' → principal がアクセスできる全店舗
- * - それ以外 → その店舗（アクセス検証つき）
+ * - 'all' または未指定 → principal がアクセスできる全店舗
+ * - 単一ID → その店舗（アクセス検証つき）
+ * - カンマ区切りの複数ID（例 "id1,id2"）→ 指定された複数店舗を合算（各店舗アクセス検証つき）
  */
 export async function resolveFacilityIds(
   prisma: PrismaService,
@@ -20,15 +21,29 @@ export async function resolveFacilityIds(
 ): Promise<string[]> {
   const scope = computeAccessScope(principal);
 
-  if (facilityId && facilityId !== ALL_FACILITIES) {
-    const f = await prisma.facility
-      .findUnique({ where: { id: facilityId } })
-      .catch(() => null);
-    if (!f) throw new BadRequestException('店舗が存在しません');
-    if (!canAccessFacility(scope, f)) {
-      throw new ForbiddenException('この店舗を操作する権限がありません');
+  // カンマ区切りで複数店舗を許容（'all'トークンや空要素は無視）
+  const requested = [
+    ...new Set(
+      (facilityId ?? '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter((s) => s && s !== ALL_FACILITIES),
+    ),
+  ];
+
+  if (requested.length > 0) {
+    const fs = await prisma.facility.findMany({
+      where: { id: { in: requested } },
+    });
+    if (fs.length !== requested.length) {
+      throw new BadRequestException('店舗が存在しません');
     }
-    return [facilityId];
+    for (const f of fs) {
+      if (!canAccessFacility(scope, f)) {
+        throw new ForbiddenException('この店舗を操作する権限がありません');
+      }
+    }
+    return requested;
   }
 
   // 全店舗
