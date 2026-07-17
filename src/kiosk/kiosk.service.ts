@@ -11,6 +11,7 @@ import * as bcrypt from 'bcryptjs';
 import * as jwt from 'jsonwebtoken';
 import { PrismaService } from '../prisma/prisma.service';
 import { AttendanceService } from '../attendance/attendance.service';
+import { HealthRecordsService } from '../health-records/health-records.service';
 import {
   AccessScope,
   canAccessFacility,
@@ -29,6 +30,7 @@ export class KioskService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly attendance: AttendanceService,
+    private readonly health: HealthRecordsService,
   ) {}
 
   // PIN試行回数の制限はDB(kiosk_pin_attempts)で永続管理する（複数インスタンス間で有効）。
@@ -215,17 +217,25 @@ export class KioskService {
   /** 打刻画面に出す情報（今日の予定・中抜け・アラート） */
   async board(operationToken: string) {
     const userId = this.verifyOperationToken(operationToken);
-    const [today, alerts] = await Promise.all([
+    const [today, alerts, health] = await Promise.all([
       this.attendance.getTodayInfo(userId),
       this.attendance.getAlerts(userId),
+      this.health.selfStatus(userId),
     ]);
-    return { today, alerts };
+    // 当月の体重が未入力なら、打刻画面で入力を促す
+    return { today, alerts, needsHealthInput: !health.recorded };
   }
 
   /** 打刻画面から本人が喫食を記録/取消 */
   async recordMeal(operationToken: string, eaten: boolean) {
     const userId = this.verifyOperationToken(operationToken);
     return this.attendance.recordMealEaten(userId, eaten);
+  }
+
+  /** 打刻画面から本人が当月の体重を記録（月1回） */
+  async recordHealth(operationToken: string, weightKg: number) {
+    const userId = this.verifyOperationToken(operationToken);
+    return this.health.recordSelfWeight(userId, weightKg);
   }
 
   /** 欠席・遅刻・早退の理由入力 */

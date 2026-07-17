@@ -160,4 +160,57 @@ export class HealthRecordsService {
     const entered = recs.filter((r) => r.weightKg != null).length;
     return { count: Math.max(0, userCount - entered) };
   }
+
+  /** 利用者本人：当月の健康記録の入力状況（体重）。 */
+  async selfStatus(userId: string) {
+    const jst = jstNow();
+    const year = jst.getFullYear();
+    const month = jst.getMonth() + 1;
+    const rec = await this.prisma.healthRecord.findUnique({
+      where: { userId_year_month: { userId, year, month } },
+      select: { weightKg: true },
+    });
+    const weightKg = rec?.weightKg != null ? Number(rec.weightKg) : null;
+    return { year, month, recorded: weightKg != null, weightKg };
+  }
+
+  /** 利用者本人：当月の体重を記録（身長は利用者プロフィール・BMI自動計算）。月1回想定。 */
+  async recordSelfWeight(userId: string, weightKg: number) {
+    if (!(weightKg > 0) || weightKg > 500) {
+      throw new BadRequestException('体重が正しくありません');
+    }
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { corporationId: true, facilityId: true, heightCm: true },
+    });
+    if (!user) throw new BadRequestException('利用者が見つかりません');
+    const jst = jstNow();
+    const year = jst.getFullYear();
+    const month = jst.getMonth() + 1;
+    const measuredOn = new Date(
+      `${year}-${pad(month)}-${pad(jst.getDate())}`,
+    );
+    await this.prisma.healthRecord.upsert({
+      where: { userId_year_month: { userId, year, month } },
+      create: {
+        corporationId: user.corporationId,
+        facilityId: user.facilityId,
+        userId,
+        year,
+        month,
+        weightKg,
+        heightCm: user.heightCm ?? null,
+        measuredOn,
+        createdBy: userId,
+        updatedBy: userId,
+      },
+      update: {
+        weightKg,
+        heightCm: user.heightCm ?? null,
+        measuredOn,
+        updatedBy: userId,
+      },
+    });
+    return { ok: true };
+  }
 }
