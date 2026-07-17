@@ -24,11 +24,16 @@ enum Role {
 }
 
 /// 施設のサービス種別（加算の適用可否に影響）
-enum ServiceType {
-  transition // 就労移行支援
-  continuous_a // 就労継続支援A型
-  continuous_b // 就労継続支援B型
-  other
+/// サービス種別マスタ（管理者が自由に追加・編集できる）。facilities.service_type にこの name を保存。
+model ServiceTypeOption {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @unique
+  sortOrder Int      @default(0) @map("sort_order")
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("service_types")
 }
 
 /// 法人・店舗・端末の状態
@@ -76,7 +81,8 @@ model Facility {
   /// ポータル(会計)の shop_id。ポータル店舗を「福祉事業所」として指定するための紐付け。
   externalShopId String?     @unique @map("external_shop_id")
   name          String
-  serviceType   ServiceType? @map("service_type")
+  /// サービス種別（ServiceTypeOption.name を保存する自由記述）
+  serviceType   String?      @map("service_type")
   mealsEnabled  Boolean      @default(false) @map("meals_enabled")
   mealChangeDeadlineDays Int  @default(14) @map("meal_change_deadline_days") // 利用日までこの日数以内は「申請」扱い＋キャンセル料対象
   email         String?

@@ -11,13 +11,6 @@ import {
 } from 'class-validator';
 import { AddressContactDto } from '../../common/dto/address-contact.dto';
 
-const SERVICE_TYPES = [
-  'transition',
-  'continuous_a',
-  'continuous_b',
-  'other',
-] as const;
-
 export class UpdateFacilityDto extends AddressContactDto {
   @IsOptional()
   @IsString()
@@ -26,8 +19,9 @@ export class UpdateFacilityDto extends AddressContactDto {
   name?: string;
 
   @IsOptional()
-  @IsIn(SERVICE_TYPES)
-  serviceType?: (typeof SERVICE_TYPES)[number];
+  @IsString()
+  @MaxLength(50)
+  serviceType?: string;
 
   @IsOptional()
   @IsBoolean()

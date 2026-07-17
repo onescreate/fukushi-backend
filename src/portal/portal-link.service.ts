@@ -3,12 +3,11 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { ServiceType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { PortalService } from './portal.service';
 
 export interface DesignateShopInput {
-  serviceType?: ServiceType | null;
+  serviceType?: string | null;
   mealsEnabled?: boolean;
 }
 

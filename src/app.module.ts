@@ -21,6 +21,7 @@ import { KioskModule } from './kiosk/kiosk.module';
 import { PostalModule } from './postal/postal.module';
 import { HealthModule } from './health/health.module';
 import { PortalModule } from './portal/portal.module';
+import { ServiceTypesModule } from './service-types/service-types.module';
 
 @Module({
   imports: [
@@ -43,6 +44,7 @@ import { PortalModule } from './portal/portal.module';
     PostalModule,
     HealthModule,
     PortalModule,
+    ServiceTypesModule,
   ],
   providers: [
     // 全エンドポイントに順に適用: ①認証 → ②テナント分離 → ③権限
