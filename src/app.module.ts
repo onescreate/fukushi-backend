@@ -20,6 +20,7 @@ import { ClosingOperationsModule } from './closing-operations/closing-operations
 import { KioskModule } from './kiosk/kiosk.module';
 import { PostalModule } from './postal/postal.module';
 import { HealthModule } from './health/health.module';
+import { PortalModule } from './portal/portal.module';
 
 @Module({
   imports: [
@@ -41,6 +42,7 @@ import { HealthModule } from './health/health.module';
     KioskModule,
     PostalModule,
     HealthModule,
+    PortalModule,
   ],
   providers: [
     // 全エンドポイントに順に適用: ①認証 → ②テナント分離 → ③権限
