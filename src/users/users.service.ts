@@ -200,11 +200,17 @@ export class UsersService {
 
   facilityOptions(principal: Principal) {
     const scope = computeAccessScope(principal);
-    let where: Prisma.FacilityWhereInput = {};
+    // ポータル連携済み(福祉事業所として指定)かつ有効な店舗のみ表示する
+    const where: Prisma.FacilityWhereInput = {
+      externalShopId: { not: null },
+      status: 'active',
+    };
     if (!scope.crossTenant) {
-      where = scope.allFacilitiesInCorporation
-        ? { corporationId: scope.corporationId ?? '__none__' }
-        : { id: { in: scope.facilityIds } };
+      if (scope.allFacilitiesInCorporation) {
+        where.corporationId = scope.corporationId ?? '__none__';
+      } else {
+        where.id = { in: scope.facilityIds };
+      }
     }
     return this.prisma.facility.findMany({
       where,

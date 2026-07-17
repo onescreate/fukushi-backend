@@ -232,14 +232,16 @@ export class StaffService {
   /** 職員フォームの店舗選択肢（スコープ内） */
   facilityOptions(principal: Principal) {
     const scope = computeAccessScope(principal);
-    let where: Prisma.FacilityWhereInput = {};
+    // ポータル連携済み(福祉事業所として指定)かつ有効な店舗のみ
+    const where: Prisma.FacilityWhereInput = {
+      externalShopId: { not: null },
+      status: 'active',
+    };
     if (!scope.crossTenant) {
-      where = scope.allFacilitiesInCorporation
-        ? { corporationId: scope.corporationId ?? '__none__' }
-        : {
-            corporationId: scope.corporationId ?? '__none__',
-            id: { in: scope.facilityIds },
-          };
+      where.corporationId = scope.corporationId ?? '__none__';
+      if (!scope.allFacilitiesInCorporation) {
+        where.id = { in: scope.facilityIds };
+      }
     }
     return this.prisma.facility.findMany({
       where,
