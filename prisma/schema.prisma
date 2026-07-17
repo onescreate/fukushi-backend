@@ -48,6 +48,8 @@ enum UserStatus {
 /// 法人（テナント最上位）
 model Corporation {
   id            String       @id @default(uuid()) @db.Uuid
+  /// ポータル(会計)の corp_id。ポータル法人を単一マスタとして参照するための紐付け。
+  externalCorpId String?     @unique @map("external_corp_id")
   name          String
   status        EntityStatus @default(active)
   establishedOn DateTime?    @map("established_on") @db.Date
@@ -71,6 +73,8 @@ model Corporation {
 model Facility {
   id            String       @id @default(uuid()) @db.Uuid
   corporationId String       @map("corporation_id") @db.Uuid
+  /// ポータル(会計)の shop_id。ポータル店舗を「福祉事業所」として指定するための紐付け。
+  externalShopId String?     @unique @map("external_shop_id")
   name          String
   serviceType   ServiceType? @map("service_type")
   mealsEnabled  Boolean      @default(false) @map("meals_enabled")

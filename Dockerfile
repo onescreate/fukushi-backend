@@ -18,4 +18,5 @@ ENV NODE_ENV=production
 # Cloud Run は PORT 環境変数で待受ポートを渡す（main.ts が参照）
 EXPOSE 8080
 
-CMD ["node", "dist/main.js"]
+# 起動時に未適用マイグレーションを本番DBへ適用してから起動（prisma CLIは同梱済み）
+CMD npx prisma migrate deploy && node dist/main.js
