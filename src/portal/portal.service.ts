@@ -23,6 +23,18 @@ export interface PortalStaff {
   jobTitle: string | null;
 }
 
+/** ポータルのログインユーザー（ones_accounting_users）。 */
+export interface PortalUser {
+  id: string;
+  name: string | null;
+  email: string;
+  role: string | null;
+  permissions: unknown;
+  systemAccess: unknown;
+  staffId: number | null;
+  shopId: string | null;
+}
+
 /**
  * ポータル（会計）システムのDBを読み取り専用で参照するサービス。
  * PORTAL_DATABASE_URL が未設定なら無効（enabled=false）。
@@ -48,10 +60,25 @@ export class PortalService implements OnModuleDestroy {
     return !!this.pool;
   }
 
-  private async query<T>(sql: string): Promise<T[]> {
+  private async query<T>(sql: string, params: unknown[] = []): Promise<T[]> {
     if (!this.pool) throw new Error('PORTAL_DATABASE_URL 未設定：ポータル連携が無効です');
-    const r = await this.pool.query(sql);
+    const r = await this.pool.query(sql, params);
     return r.rows as T[];
+  }
+
+  /** ポータルのログインユーザーをメールで引き当てる（福祉ログインの照合用）。 */
+  async getUserByEmail(email: string): Promise<PortalUser | null> {
+    if (!this.pool) return null;
+    const rows = await this.query<PortalUser>(
+      `SELECT id::text AS id, name, email, role,
+              permissions, system_access AS "systemAccess",
+              staff_id AS "staffId", shop_id AS "shopId"
+       FROM ones_accounting_users
+       WHERE email = $1 AND (delete_flag = false OR delete_flag IS NULL)
+       LIMIT 1`,
+      [email],
+    );
+    return rows[0] ?? null;
   }
 
   getCorps(): Promise<PortalCorp[]> {
