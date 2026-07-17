@@ -13,7 +13,9 @@ export class CorporationsService {
   constructor(private readonly prisma: PrismaService) {}
 
   list() {
+    // ポータル連携済み(福祉事業所の法人)かつ有効な法人のみ。手動で入れたサンプル法人は除外。
     return this.prisma.corporation.findMany({
+      where: { externalCorpId: { not: null }, status: 'active' },
       orderBy: { createdAt: 'asc' },
       include: {
         _count: { select: { facilities: true, users: true, staff: true } },
