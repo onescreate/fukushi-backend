@@ -255,6 +255,23 @@ export class SchedulesService {
         approvedAt: status === 'approved' ? new Date() : null,
       },
     });
+    // 中抜けの明細を洗い替え（利用者が申請するのは break_out のみ）
+    const breaks = (dto.breaks ?? []).filter(
+      (b) => b.plannedOut || b.plannedIn,
+    );
+    await this.prisma.scheduleDetail.deleteMany({
+      where: { scheduleId: schedule.id, eventType: 'break_out' },
+    });
+    if (breaks.length) {
+      await this.prisma.scheduleDetail.createMany({
+        data: breaks.map((b) => ({
+          scheduleId: schedule.id,
+          eventType: 'break_out' as const,
+          plannedOut: b.plannedOut ?? null,
+          plannedIn: b.plannedIn ?? null,
+        })),
+      });
+    }
     return { schedule, autoApproved: status === 'approved' };
   }
 }

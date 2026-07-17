@@ -7,6 +7,7 @@ import { MealReservationController } from './meal-reservation.controller';
 import { MyMealsController } from './my-meals.controller';
 import { MealReservationService } from './meal-reservation.service';
 import { BillingController } from './billing.controller';
+import { MyBillingController } from './my-billing.controller';
 import { BillingService } from './billing.service';
 import { InvoiceSettingController } from './invoice-setting.controller';
 import { InvoiceSettingService } from './invoice-setting.service';
@@ -22,6 +23,7 @@ import { StatsService } from './stats.service';
     MealReservationController,
     MyMealsController,
     BillingController,
+    MyBillingController,
     InvoiceSettingController,
     DeliveryController,
     StatsController,

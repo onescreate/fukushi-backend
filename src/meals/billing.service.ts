@@ -52,6 +52,39 @@ export class BillingService {
     return user;
   }
 
+  /**
+   * 利用者本人の請求書一覧（確定＝月締め済みの食事代のみ）。
+   * closedSnapshot が保存されている月＝請求確定月。新しい月から並べる。
+   */
+  async myBilling(userId: string) {
+    const records = await this.prisma.billingRecord.findMany({
+      where: { userId },
+      orderBy: [{ year: 'desc' }, { month: 'desc' }],
+    });
+    return records
+      .map((r) => {
+        const snap = parseBillingSnapshot(r.closedSnapshot);
+        if (!snap) return null; // 未締め（スナップショット無し）＝請求書はまだ発行されていない
+        return {
+          year: r.year,
+          month: r.month,
+          mealCount: snap.mealCount,
+          mealTotal: snap.mealTotal,
+          cancelCount: snap.cancelCount,
+          cancelTotal: snap.cancelTotal,
+          subtotal: snap.subtotal,
+          taxAmount: snap.taxAmount,
+          total: snap.total,
+          taxRate: snap.taxRate,
+          paid: !!r.paymentDate,
+          paymentDate: r.paymentDate
+            ? r.paymentDate.toISOString().slice(0, 10)
+            : null,
+        };
+      })
+      .filter((r): r is NonNullable<typeof r> => r !== null);
+  }
+
   /** 対象年月・法人の消費税設定（軽減税率・その月末時点で有効な履歴）。 */
   private async taxForMonth(
     corporationId: string,
