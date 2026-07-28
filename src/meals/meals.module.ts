@@ -15,8 +15,12 @@ import { DeliveryController } from './delivery.controller';
 import { DeliveryService } from './delivery.service';
 import { StatsController } from './stats.controller';
 import { StatsService } from './stats.service';
+import { SchedulesModule } from '../schedules/schedules.module';
+import { HealthRecordsModule } from '../health-records/health-records.module';
 
 @Module({
+  // バッジ集約(StatsService)で予定承認待ち・健康未入力の件数を各サービスから取得するため取り込む
+  imports: [SchedulesModule, HealthRecordsModule],
   controllers: [
     MealPricingController,
     TaxSettingController,

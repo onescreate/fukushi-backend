@@ -5,6 +5,9 @@ import { getPermissionsForPrincipal } from '../auth/permissions';
 import { Principal } from '../auth/principal.types';
 import { resolveFacilityIds } from '../common/facility-scope';
 import { BillingService } from './billing.service';
+import { MealReservationService } from './meal-reservation.service';
+import { SchedulesService } from '../schedules/schedules.service';
+import { HealthRecordsService } from '../health-records/health-records.service';
 import { pad, jstNow } from '../common/date';
 
 @Injectable()
@@ -12,6 +15,9 @@ export class StatsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly billing: BillingService,
+    private readonly mealReservation: MealReservationService,
+    private readonly schedules: SchedulesService,
+    private readonly healthRecords: HealthRecordsService,
   ) {}
 
   /** 店舗×年月のダッシュボード集計（通所・食事・請求）。 */
@@ -120,7 +126,11 @@ export class StatsService {
     return scope.facilityIds;
   }
 
-  /** サイドバー通知バッジ用の件数（未入金・当日の納品未登録）。 */
+  /**
+   * サイドバー/ダッシュボードの通知バッジ件数を1回で返す（従来は4エンドポイントを個別ポーリングしていたのを集約）。
+   * 各件数は権限を持つ場合のみ算出（持たなければ0）。予定承認待ち・食事承認待ち・健康未入力は既存サービスへ委譲し、
+   * ロジックの二重化を避ける。
+   */
   async badges(principal: Principal) {
     const perms = getPermissionsForPrincipal(principal);
     const facilityIds = await this.accessibleFacilityIds(principal);
@@ -160,6 +170,17 @@ export class StatsService {
       }
     }
 
-    return { unpaid, deliveryMissing };
+    // 承認待ち・健康未入力は既存サービスの件数メソッドへ委譲（権限がある場合のみ）
+    const pendingSchedule = perms.has('schedule.approve')
+      ? (await this.schedules.pendingCount(principal)).count
+      : 0;
+    const pendingMeal = perms.has('meal.manage')
+      ? (await this.mealReservation.pendingCount(principal)).count
+      : 0;
+    const healthMissing = perms.has('health.view')
+      ? (await this.healthRecords.missingCount(principal)).count
+      : 0;
+
+    return { unpaid, deliveryMissing, pendingSchedule, pendingMeal, healthMissing };
   }
 }
