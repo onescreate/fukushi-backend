@@ -16,16 +16,19 @@ export class AuthController {
   @Get('me')
   async me(@CurrentUser() principal: Principal) {
     let mealsEnabled = false;
+    let facilityName: string | undefined;
     if (principal.type === 'user') {
       const f = await this.prisma.facility.findUnique({
         where: { id: principal.facilityId },
-        select: { mealsEnabled: true },
+        select: { mealsEnabled: true, name: true },
       });
       mealsEnabled = f?.mealsEnabled ?? false;
+      facilityName = f?.name;
     }
     return {
       ...principal,
       mealsEnabled,
+      facilityName,
       permissions: [...getPermissionsForPrincipal(principal)],
     };
   }
