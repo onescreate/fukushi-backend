@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   IsArray,
   IsDateString,
   IsOptional,
@@ -52,4 +53,25 @@ export class MySubmitScheduleDto {
   @ValidateNested({ each: true })
   @Type(() => MyBreakDto)
   breaks?: MyBreakDto[];
+}
+
+/** 予定の一括申請（複数日にまとめて同じ通所時間を登録する）。中抜けは対象外（各日の既存はそのまま）。 */
+export class MyBulkSubmitScheduleDto {
+  @IsArray()
+  @ArrayMaxSize(62, { message: '一度に登録できるのは最大62日です' })
+  @IsDateString({}, { each: true, message: '日付の形式が正しくありません' })
+  dates!: string[];
+
+  @IsOptional()
+  @Matches(HHMM, { message: '開始時刻は HH:MM で入力してください' })
+  planIn?: string;
+
+  @IsOptional()
+  @Matches(HHMM, { message: '終了時刻は HH:MM で入力してください' })
+  planOut?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  note?: string;
 }

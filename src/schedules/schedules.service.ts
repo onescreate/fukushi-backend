@@ -16,7 +16,10 @@ import { CreateScheduleDto } from './dto/create-schedule.dto';
 import { UpdateScheduleDto } from './dto/update-schedule.dto';
 import { BulkScheduleDto } from './dto/bulk-schedule.dto';
 import { CreateScheduleDetailDto } from './dto/create-detail.dto';
-import { MySubmitScheduleDto } from './dto/my-submit-schedule.dto';
+import {
+  MySubmitScheduleDto,
+  MyBulkSubmitScheduleDto,
+} from './dto/my-submit-schedule.dto';
 import { computeAutoApproveStatus } from './schedule-rules';
 
 @Injectable()
@@ -274,5 +277,48 @@ export class SchedulesService {
       });
     }
     return { schedule, autoApproved: status === 'approved' };
+  }
+
+  /** 複数日にまとめて同じ通所時間を申請（中抜けは触らず、各日の既存明細はそのまま）。 */
+  async myBulkSubmit(
+    principal: { id: string; corporationId: string; facilityId: string },
+    dto: MyBulkSubmitScheduleDto,
+  ) {
+    let approved = 0;
+    let pending = 0;
+    for (const date of dto.dates) {
+      const status = computeAutoApproveStatus(date);
+      await this.prisma.schedule.upsert({
+        where: {
+          userId_planDate: {
+            userId: principal.id,
+            planDate: new Date(date),
+          },
+        },
+        create: {
+          corporationId: principal.corporationId,
+          facilityId: principal.facilityId,
+          userId: principal.id,
+          planDate: new Date(date),
+          planIn: dto.planIn,
+          planOut: dto.planOut,
+          note: dto.note,
+          status,
+          createdBy: principal.id,
+          approvedAt: status === 'approved' ? new Date() : null,
+        },
+        update: {
+          planIn: dto.planIn,
+          planOut: dto.planOut,
+          note: dto.note,
+          status,
+          approvedBy: null,
+          approvedAt: status === 'approved' ? new Date() : null,
+        },
+      });
+      if (status === 'approved') approved++;
+      else pending++;
+    }
+    return { approved, pending };
   }
 }

@@ -8,7 +8,10 @@ import {
 } from '@nestjs/common';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { Principal } from '../auth/principal.types';
-import { MySubmitScheduleDto } from './dto/my-submit-schedule.dto';
+import {
+  MySubmitScheduleDto,
+  MyBulkSubmitScheduleDto,
+} from './dto/my-submit-schedule.dto';
 import { SchedulesService } from './schedules.service';
 import { ParseYmdPipe } from '../common/parse-ymd.pipe';
 
@@ -41,6 +44,22 @@ export class MySchedulesController {
   ) {
     const user = this.asUser(principal);
     return this.service.mySubmit(
+      {
+        id: user.id,
+        corporationId: user.corporationId,
+        facilityId: user.facilityId,
+      },
+      dto,
+    );
+  }
+
+  @Post('bulk')
+  bulkSubmit(
+    @CurrentUser() principal: Principal,
+    @Body() dto: MyBulkSubmitScheduleDto,
+  ) {
+    const user = this.asUser(principal);
+    return this.service.myBulkSubmit(
       {
         id: user.id,
         corporationId: user.corporationId,
