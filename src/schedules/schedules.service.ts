@@ -269,6 +269,7 @@ export class SchedulesService {
           eventType: 'break_out' as const,
           plannedOut: b.plannedOut ?? null,
           plannedIn: b.plannedIn ?? null,
+          note: b.note ?? null,
         })),
       });
     }

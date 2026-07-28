@@ -20,6 +20,12 @@ export class MyBreakDto {
   @IsOptional()
   @Matches(HHMM, { message: '戻り時刻は HH:MM で入力してください' })
   plannedIn?: string;
+
+  // 用件（例「通院：精神科」「ハローワーク：失業認定日」「その他：〇〇」）。任意。
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  note?: string;
 }
 
 /** 利用者本人が自分の予定を申請するときの入力 */
