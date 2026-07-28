@@ -111,6 +111,18 @@ const requireSuperAdmin = (req, res, next) => {
     next();
 };
 
+// 門番4: セットアップ/DB構築系の保護。
+// 環境変数 SETUP_SECRET と一致する key（?key=... または x-setup-key ヘッダー）が無ければ拒否する。
+// SETUP_SECRET が未設定の環境では、誰も実行できない（＝完全ロック）。
+// これにより「URLを叩くだけでDBを操作される」事故を防ぐ。アプリ本体はこれらのAPIを呼ばないため影響なし。
+const verifySetupSecret = (req, res, next) => {
+    const provided = req.query.key || req.headers['x-setup-key'];
+    if (!process.env.SETUP_SECRET || provided !== process.env.SETUP_SECRET) {
+        return res.status(403).json({ success: false, error: 'セキュリティ保護: この操作にはセットアップキーが必要です' });
+    }
+    next();
+};
+
 // ★ ここから下に書かれているURLに対して、自動的に門番を適用する設定
 // ※ '/admin' から始まるURLには「門番1」を、'/user' から始まるURLには「門番2」を自動配置
 router.use('/admin', verifyAdminToken);
@@ -120,7 +132,12 @@ router.use('/user', verifyUserToken);
 // ====================================================
 // 2. データベース完全再構築 API (古い打刻データも一掃)
 // ====================================================
-router.get('/setup-db', async (req, res) => {
+router.get('/setup-db', verifySetupSecret, async (req, res) => {
+    // ★危険：このAPIは打刻・予定・食事など全テーブルをDROP（全消去）します。
+    // 誤操作による本番データ消失を防ぐため、セットアップキーに加えて confirm=DROP_ALL を必須にする。
+    if (req.query.confirm !== 'DROP_ALL') {
+        return res.status(400).json({ success: false, error: '全テーブル削除の確認が必要です。本当に全消去する場合のみ confirm=DROP_ALL を付けてください。' });
+    }
     const forceSetupSql = `
         DROP TABLE IF EXISTS fukushi_attendance CASCADE;
         DROP TABLE IF EXISTS fukushi_schedule_details CASCADE;
@@ -200,7 +217,7 @@ router.get('/setup-db', async (req, res) => {
 
 // fukushi-backend/routes/auth.js
 
-router.get('/setup-invoice-db', async (req, res) => {
+router.get('/setup-invoice-db', verifySetupSecret, async (req, res) => {
     try {
         await pool.query('BEGIN');
         // ① 請求者情報（インボイス）履歴テーブルの修正
@@ -244,7 +261,7 @@ router.get('/setup-invoice-db', async (req, res) => {
 // ====================================================
 // ★ 健康管理（体重・BMI）テーブルの確実な作成・更新API
 // ====================================================
-router.get('/setup-health-db', async (req, res) => {
+router.get('/setup-health-db', verifySetupSecret, async (req, res) => {
     try {
         await pool.query(`
             CREATE TABLE IF NOT EXISTS fukushi_health_records (
@@ -969,7 +986,7 @@ router.get('/admin/billing-list', async (req, res) => {
 // ====================================================
 // ★ 納品管理テーブルの確実な作成・更新API（店舗対応版）
 // ====================================================
-router.get('/setup-delivery-db', async (req, res) => {
+router.get('/setup-delivery-db', verifySetupSecret, async (req, res) => {
     try {
         // 新規作成時の設計（店舗IDを含む複合主キー）
         await pool.query(`
@@ -1261,7 +1278,7 @@ router.post('/admin/health-record/update', async (req, res) => {
 // ====================================================
 // ★ テスト用：サンプル利用者追加API (15名追加・合計18名版)
 // ====================================================
-router.get('/setup-sample-users', async (req, res) => {
+router.get('/setup-sample-users', verifySetupSecret, async (req, res) => {
     try {
         // テスト用のPINコード「1234」を暗号化（ハッシュ化）
         const hashedPin = await bcrypt.hash('1234', 10);
@@ -1382,7 +1399,7 @@ router.get('/admin/meal/pending-count', async (req, res) => {
 // ====================================================
 // ★ 更新：利用者マスタのDB構成（店舗IDカラム追加版）
 // ====================================================
-router.get('/setup-user-master-db', async (req, res) => {
+router.get('/setup-user-master-db', verifySetupSecret, async (req, res) => {
     try {
         await pool.query(`
             DO $$ 
@@ -1518,7 +1535,7 @@ router.get('/user/health-check', async (req, res) => {
 // ====================================================
 
 // テーブル作成・更新
-router.get('/setup-store-db', async (req, res) => {
+router.get('/setup-store-db', verifySetupSecret, async (req, res) => {
     try {
         await pool.query(`
             CREATE TABLE IF NOT EXISTS fukushi_stores (
@@ -1575,7 +1592,7 @@ router.post('/admin/stores/save', async (req, res) => {
 // ====================================================
 
 // テーブル作成・更新
-router.get('/setup-admin-master-db', async (req, res) => {
+router.get('/setup-admin-master-db', verifySetupSecret, async (req, res) => {
     try {
         await pool.query(`
             CREATE TABLE IF NOT EXISTS fukushi_admins (

@@ -3,8 +3,18 @@ const router = express.Router();
 const bcrypt = require('bcrypt');
 const pool = require('../db'); // さっき作ったdb.jsを呼び出す
 
-// 疎通確認テスト用
-router.get('/test', async (req, res) => {
+// セットアップ/疎通確認系の保護（auth.js の verifySetupSecret と同じ仕組み）。
+// 環境変数 SETUP_SECRET と一致する key が無ければ拒否。未設定なら完全ロック。
+const verifySetupSecret = (req, res, next) => {
+    const provided = req.query.key || req.headers['x-setup-key'];
+    if (!process.env.SETUP_SECRET || provided !== process.env.SETUP_SECRET) {
+        return res.status(403).json({ success: false, error: 'セキュリティ保護: この操作にはセットアップキーが必要です' });
+    }
+    next();
+};
+
+// 疎通確認テスト用（店舗情報を返すため保護）
+router.get('/test', verifySetupSecret, async (req, res) => {
     try {
         const result = await pool.query('SELECT * FROM fukushi_stores');
         res.json({ success: true, message: 'DB接続大成功！', data: result.rows });
@@ -14,8 +24,8 @@ router.get('/test', async (req, res) => {
     }
 });
 
-// デモデータ作成用
-router.get('/setup-demo', async (req, res) => {
+// デモデータ作成用（保護）
+router.get('/setup-demo', verifySetupSecret, async (req, res) => {
     try {
         const hashedAdminPass = await bcrypt.hash('password123', 10);
         const hashedUserPin = await bcrypt.hash('1234', 10);
