@@ -375,6 +375,7 @@ export class AttendanceService {
         .map((d) => ({
           plannedOut: d.plannedOut,
           plannedIn: d.plannedIn,
+          note: d.note,
         })),
       meal: mealInfo as null | { status: string },
     };
@@ -406,7 +407,11 @@ export class AttendanceService {
       planOut: schedule.planOut ?? null,
       breaks: details
         .filter((d) => d.eventType === 'break_out')
-        .map((d) => ({ plannedOut: d.plannedOut, plannedIn: d.plannedIn })),
+        .map((d) => ({
+          plannedOut: d.plannedOut,
+          plannedIn: d.plannedIn,
+          note: d.note,
+        })),
       practicePlace:
         details.find((d) => d.eventType === 'practice')?.note ?? null,
       mealReserved,
