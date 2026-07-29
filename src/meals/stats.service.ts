@@ -139,11 +139,38 @@ export class StatsService {
     const month = jst.getMonth() + 1;
     const todayStr = `${year}-${pad(month)}-${pad(jst.getDate())}`;
 
+    // 未入金・未発行は「締め済みの月」だけを対象にする（当月は集計中でノイズになるため）。
+    // 直近12ヶ月の締め済み(facility,year,month)に属する請求レコードを数える。
     let unpaid = 0;
+    let unissued = 0;
     if (perms.has('billing.view')) {
-      for (const fid of facilityIds) {
-        const b = await this.billing.list(principal, fid, year, month);
-        unpaid += b.rows.filter((r) => !r.paymentDate).length;
+      const cutoffYm = year * 12 + (month - 1) - 11; // 直近12ヶ月
+      const cutoffYear = year - 1;
+      const closings = await this.prisma.billingClosing.findMany({
+        where: { facilityId: { in: facilityIds }, year: { gte: cutoffYear } },
+        select: { facilityId: true, year: true, month: true },
+      });
+      const closedSet = new Set(
+        closings
+          .filter((c) => c.year * 12 + (c.month - 1) >= cutoffYm)
+          .map((c) => `${c.facilityId}:${c.year}:${c.month}`),
+      );
+      if (closedSet.size > 0) {
+        const records = await this.prisma.billingRecord.findMany({
+          where: { facilityId: { in: facilityIds }, year: { gte: cutoffYear } },
+          select: {
+            facilityId: true,
+            year: true,
+            month: true,
+            paymentDate: true,
+            issuedDate: true,
+          },
+        });
+        for (const r of records) {
+          if (!closedSet.has(`${r.facilityId}:${r.year}:${r.month}`)) continue;
+          if (!r.paymentDate) unpaid++;
+          if (!r.issuedDate) unissued++;
+        }
       }
     }
 
@@ -181,6 +208,13 @@ export class StatsService {
       ? (await this.healthRecords.missingCount(principal)).count
       : 0;
 
-    return { unpaid, deliveryMissing, pendingSchedule, pendingMeal, healthMissing };
+    return {
+      unpaid,
+      unissued,
+      deliveryMissing,
+      pendingSchedule,
+      pendingMeal,
+      healthMissing,
+    };
   }
 }
