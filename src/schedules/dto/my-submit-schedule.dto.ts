@@ -47,7 +47,13 @@ export class MySubmitScheduleDto {
   @MaxLength(200)
   note?: string;
 
-  /** 中抜け（任意・複数可） */
+  /** 実習先（指定時はその日を「実習」として扱い、中抜けは登録しない）。未指定=通所。 */
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  practicePlace?: string;
+
+  /** 中抜け（任意・複数可。通所日のみ有効） */
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })

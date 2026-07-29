@@ -171,6 +171,9 @@ export class AttendanceService {
         planIn: s?.planIn ?? null,
         planOut: s?.planOut ?? null,
         scheduleStatus: s?.status ?? null,
+        practicePlace:
+          (s?.details ?? []).find((d) => d.eventType === 'practice')?.note ??
+          null,
         breaks: (s?.details ?? [])
           .filter((d) => d.eventType === 'break_out')
           .map((d) => ({

@@ -258,23 +258,38 @@ export class SchedulesService {
         approvedAt: status === 'approved' ? new Date() : null,
       },
     });
-    // 中抜けの明細を洗い替え（利用者が申請するのは break_out のみ）
-    const breaks = (dto.breaks ?? []).filter(
-      (b) => b.plannedOut || b.plannedIn,
-    );
+    // 明細の洗い替え（利用者が申請するのは 実習(practice) または 中抜け(break_out) のみ）
     await this.prisma.scheduleDetail.deleteMany({
-      where: { scheduleId: schedule.id, eventType: 'break_out' },
+      where: {
+        scheduleId: schedule.id,
+        eventType: { in: ['break_out', 'practice'] },
+      },
     });
-    if (breaks.length) {
-      await this.prisma.scheduleDetail.createMany({
-        data: breaks.map((b) => ({
+    if (dto.practicePlace) {
+      // 実習日：実習先を note に持つ practice 明細を1件（中抜けは対象外）
+      await this.prisma.scheduleDetail.create({
+        data: {
           scheduleId: schedule.id,
-          eventType: 'break_out' as const,
-          plannedOut: b.plannedOut ?? null,
-          plannedIn: b.plannedIn ?? null,
-          note: b.note ?? null,
-        })),
+          eventType: 'practice',
+          note: dto.practicePlace,
+        },
       });
+    } else {
+      // 通所日：中抜けを登録
+      const breaks = (dto.breaks ?? []).filter(
+        (b) => b.plannedOut || b.plannedIn,
+      );
+      if (breaks.length) {
+        await this.prisma.scheduleDetail.createMany({
+          data: breaks.map((b) => ({
+            scheduleId: schedule.id,
+            eventType: 'break_out' as const,
+            plannedOut: b.plannedOut ?? null,
+            plannedIn: b.plannedIn ?? null,
+            note: b.note ?? null,
+          })),
+        });
+      }
     }
     return { schedule, autoApproved: status === 'approved' };
   }
