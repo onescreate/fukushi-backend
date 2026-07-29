@@ -214,16 +214,17 @@ export class KioskService {
     return this.attendance.recordClock(userId, type);
   }
 
-  /** 打刻画面に出す情報（今日の予定・中抜け・アラート） */
+  /** 打刻画面に出す情報（今日の予定・中抜け・アラート・次回予定） */
   async board(operationToken: string) {
     const userId = this.verifyOperationToken(operationToken);
-    const [today, alerts, health] = await Promise.all([
+    const [today, nextVisit, alerts, health] = await Promise.all([
       this.attendance.getTodayInfo(userId),
+      this.attendance.getNextVisit(userId),
       this.attendance.getAlerts(userId),
       this.health.selfStatus(userId),
     ]);
     // 当月の体重が未入力なら、打刻画面で入力を促す
-    return { today, alerts, needsHealthInput: !health.recorded };
+    return { today, nextVisit, alerts, needsHealthInput: !health.recorded };
   }
 
   /** 打刻画面から本人が喫食を記録/取消 */

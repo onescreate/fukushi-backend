@@ -380,6 +380,39 @@ export class AttendanceService {
     };
   }
 
+  /**
+   * 次回の通所予定（今日より後の、直近の承認済み予定）。退所打刻画面に出す。
+   * 予定・中抜け・食事予約(あり/なし)・実習先を返す。無ければ null。
+   */
+  async getNextVisit(userId: string) {
+    const today = new Date(dateStr(jstNow()));
+    const schedule = await this.prisma.schedule.findFirst({
+      where: { userId, status: 'approved', planDate: { gt: today } },
+      orderBy: { planDate: 'asc' },
+      include: { details: true },
+    });
+    if (!schedule) return null;
+    const meal = await this.prisma.meal.findUnique({
+      where: { userId_mealDate: { userId, mealDate: schedule.planDate } },
+    });
+    const mealReserved =
+      !!meal &&
+      meal.approvalStatus === 'approved' &&
+      (meal.status === 'reserved' || meal.status === 'eaten');
+    const details = schedule.details ?? [];
+    return {
+      date: dateStr(schedule.planDate),
+      planIn: schedule.planIn ?? null,
+      planOut: schedule.planOut ?? null,
+      breaks: details
+        .filter((d) => d.eventType === 'break_out')
+        .map((d) => ({ plannedOut: d.plannedOut, plannedIn: d.plannedIn })),
+      practicePlace:
+        details.find((d) => d.eventType === 'practice')?.note ?? null,
+      mealReserved,
+    };
+  }
+
   /** 打刻画面から本人が喫食を記録/取消（本日の承認済み予約のみ対象） */
   async recordMealEaten(userId: string, eaten: boolean) {
     const workDate = new Date(dateStr(jstNow()));
