@@ -1,4 +1,5 @@
 import {
+  IsBoolean,
   IsOptional,
   IsString,
   Matches,
@@ -40,4 +41,51 @@ export class UpsertInvoiceSettingDto {
   @IsString()
   @MaxLength(500)
   bankInfo?: string;
+}
+
+/** 事業所ごとの請求書設定（口座選択・社印・任意の上書き）。 */
+export class SaveInvoiceConfigDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  bankAccountId?: string | null;
+
+  @IsOptional()
+  @IsBoolean()
+  sealEnabled?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  issuerNameOverride?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  registrationNumberOverride?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
+  postalCodeOverride?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  addressOverride?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  phoneOverride?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  bankInfoOverride?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  remark?: string;
 }

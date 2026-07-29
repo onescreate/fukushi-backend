@@ -11,7 +11,10 @@ import {
 import { CurrentUser } from '../auth/current-user.decorator';
 import { Principal } from '../auth/principal.types';
 import { RequirePermission } from '../auth/require-permission.decorator';
-import { UpsertInvoiceSettingDto } from './dto/invoice-setting.dto';
+import {
+  UpsertInvoiceSettingDto,
+  SaveInvoiceConfigDto,
+} from './dto/invoice-setting.dto';
 import { InvoiceSettingService } from './invoice-setting.service';
 import { ParseYmdPipe } from '../common/parse-ymd.pipe';
 
@@ -28,6 +31,47 @@ export class InvoiceSettingController {
     @Query('date', ParseYmdPipe) date: string,
   ) {
     return this.service.active(principal, facilityId, date);
+  }
+
+  /** 請求書に使う発行者情報（ポータル法人＋振込先＋社印＋上書きを解決）。 */
+  @Get(':facilityId/issuer')
+  issuer(
+    @CurrentUser() principal: Principal,
+    @Param('facilityId') facilityId: string,
+    @Query('date', ParseYmdPipe) date: string,
+  ) {
+    return this.service.resolveIssuer(principal, facilityId, date);
+  }
+
+  /** 振込先選択用：法人に紐づくポータル口座一覧。 */
+  @RequirePermission('billing.issue')
+  @Get(':facilityId/accounts')
+  accounts(
+    @CurrentUser() principal: Principal,
+    @Param('facilityId') facilityId: string,
+  ) {
+    return this.service.corpAccounts(principal, facilityId);
+  }
+
+  /** 事業所の請求書設定（口座選択・社印・上書き）を取得。 */
+  @RequirePermission('billing.issue')
+  @Get(':facilityId/config')
+  getConfig(
+    @CurrentUser() principal: Principal,
+    @Param('facilityId') facilityId: string,
+  ) {
+    return this.service.getConfig(principal, facilityId);
+  }
+
+  /** 事業所の請求書設定を保存。 */
+  @RequirePermission('billing.issue')
+  @Put(':facilityId/config')
+  saveConfig(
+    @CurrentUser() principal: Principal,
+    @Param('facilityId') facilityId: string,
+    @Body() dto: SaveInvoiceConfigDto,
+  ) {
+    return this.service.saveConfig(principal, facilityId, dto);
   }
 
   @RequirePermission('billing.issue')

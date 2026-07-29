@@ -5,6 +5,24 @@ import { Pool } from 'pg';
 export interface PortalCorp {
   id: string;
   name: string;
+  invoiceNum?: string | null; // 適格請求書発行事業者登録番号
+  postalCode?: string | null;
+  address?: string | null;
+  tel?: string | null;
+  fax?: string | null;
+}
+
+/** ポータルの口座（振込先）。 */
+export interface PortalAccount {
+  id: string;
+  corpId: string | null;
+  bankName: string | null;
+  branch: string | null;
+  type: string | null;
+  number: string | null;
+  holder: string | null;
+  name: string | null;
+  shopIds: unknown;
 }
 export interface PortalShop {
   id: string;
@@ -83,7 +101,44 @@ export class PortalService implements OnModuleDestroy {
 
   getCorps(): Promise<PortalCorp[]> {
     return this.query<PortalCorp>(
-      `SELECT corp_id::text AS id, name FROM corps ORDER BY corp_id ASC`,
+      `SELECT corp_id::text AS id, name, invoice_num AS "invoiceNum",
+              postal_code AS "postalCode", address, tel, fax
+       FROM corps ORDER BY corp_id ASC`,
+    );
+  }
+
+  /** 1法人の発行者情報（請求書の発行者に使う）。 */
+  async getCorpById(corpId: string): Promise<PortalCorp | null> {
+    if (!this.pool) return null;
+    const rows = await this.query<PortalCorp>(
+      `SELECT corp_id::text AS id, name, invoice_num AS "invoiceNum",
+              postal_code AS "postalCode", address, tel, fax
+       FROM corps WHERE corp_id::text = $1 LIMIT 1`,
+      [corpId],
+    );
+    return rows[0] ?? null;
+  }
+
+  /** 法人の社印画像（無ければ null）。 */
+  async getCorpSeal(corpId: string): Promise<string | null> {
+    if (!this.pool) return null;
+    const rows = await this.query<{ sealImage: string | null }>(
+      `SELECT seal_image AS "sealImage"
+       FROM ones_accounting_corp_seals WHERE corp_id = $1 LIMIT 1`,
+      [corpId],
+    );
+    return rows[0]?.sealImage ?? null;
+  }
+
+  /** 法人に紐づく口座（振込先の候補）。 */
+  async getAccountsByCorp(corpId: string): Promise<PortalAccount[]> {
+    if (!this.pool) return [];
+    return this.query<PortalAccount>(
+      `SELECT account_id::text AS id, corp_id::text AS "corpId",
+              bank_name AS "bankName", branch, type, number, holder, name,
+              shop_ids AS "shopIds"
+       FROM accounts WHERE corp_id::text = $1 ORDER BY account_id ASC`,
+      [corpId],
     );
   }
 

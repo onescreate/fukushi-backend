@@ -17,10 +17,12 @@ import { StatsController } from './stats.controller';
 import { StatsService } from './stats.service';
 import { SchedulesModule } from '../schedules/schedules.module';
 import { HealthRecordsModule } from '../health-records/health-records.module';
+import { PortalModule } from '../portal/portal.module';
 
 @Module({
-  // バッジ集約(StatsService)で予定承認待ち・健康未入力の件数を各サービスから取得するため取り込む
-  imports: [SchedulesModule, HealthRecordsModule],
+  // バッジ集約(StatsService)で予定承認待ち・健康未入力の件数を各サービスから取得するため取り込む。
+  // 請求書の発行者情報をポータル法人から解決するため PortalModule も取り込む。
+  imports: [SchedulesModule, HealthRecordsModule, PortalModule],
   controllers: [
     MealPricingController,
     TaxSettingController,

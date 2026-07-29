@@ -104,6 +104,7 @@ model Facility {
   attendanceSetting AttendanceSetting?
   mealPricings      MealPricing[]
   invoiceSettings   InvoiceSetting[]
+  invoiceConfig     FacilityInvoiceConfig?
   mealDeliveries    MealDelivery[]
   billingClosings   BillingClosing[]
   announcements     Announcement[]
@@ -506,6 +507,31 @@ model HealthRecord {
   @@unique([userId, year, month])
   @@index([facilityId, year, month])
   @@map("health_records")
+}
+
+/// 事業所ごとの請求書設定。発行者はポータル法人から自動取得するため、
+/// ここは「振込先口座の選択」「社印の有無」「任意の上書き」だけを持つ（1店舗1件）。
+model FacilityInvoiceConfig {
+  id                         String   @id @default(uuid()) @db.Uuid
+  facilityId                 String   @unique @map("facility_id") @db.Uuid
+  bankAccountId              String?  @map("bank_account_id") // ポータル口座ID（振込先）
+  sealEnabled                Boolean  @default(true) @map("seal_enabled")
+  // 任意の上書き（未設定ならポータル法人の値を使う）
+  issuerNameOverride         String?  @map("issuer_name_override")
+  registrationNumberOverride String?  @map("registration_number_override")
+  postalCodeOverride         String?  @map("postal_code_override")
+  addressOverride            String?  @map("address_override")
+  phoneOverride              String?  @map("phone_override")
+  bankInfoOverride           String?  @map("bank_info_override")
+  remark                     String? // 備考（請求書に表示）
+  createdBy                  String?  @map("created_by") @db.Uuid
+  updatedBy                  String?  @map("updated_by") @db.Uuid
+  createdAt                  DateTime @default(now()) @map("created_at")
+  updatedAt                  DateTime @updatedAt @map("updated_at")
+
+  facility Facility @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+
+  @@map("facility_invoice_configs")
 }
 
 /// 締め業務（実績記録・加算）。利用者×日で1件。食事提供加算は喫食実績から導出。
