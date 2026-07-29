@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InvoiceSetting } from '@prisma/client';
@@ -19,6 +20,8 @@ import { PortalService, PortalAccount } from '../portal/portal.service';
 
 @Injectable()
 export class InvoiceSettingService {
+  private readonly logger = new Logger('InvoiceIssuer');
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly portal: PortalService,
@@ -49,18 +52,38 @@ export class InvoiceSettingService {
     ]);
     const extCorpId = corp?.externalCorpId ?? null;
 
+    // ポータル参照は「一部が失敗しても全体を落とさない」よう、各呼び出しを個別にガードする。
+    // 例：accounts / ones_accounting_corp_seals にSELECT権限が無くても、法人名・住所は出す。
     let portalCorp = null as Awaited<
       ReturnType<PortalService['getCorpById']>
     >;
     let seal: string | null = null;
     let accounts: PortalAccount[] = [];
+    const warnings: string[] = [];
     if (this.portal.enabled && extCorpId) {
-      [portalCorp, seal, accounts] = await Promise.all([
-        this.portal.getCorpById(extCorpId),
-        this.portal.getCorpSeal(extCorpId),
-        this.portal.getAccountsByCorp(extCorpId),
-      ]);
+      portalCorp = await this.portal.getCorpById(extCorpId).catch((e) => {
+        this.logger.warn(`corps参照に失敗(corp=${extCorpId}): ${String(e)}`);
+        warnings.push('corp');
+        return null;
+      });
+      seal = await this.portal.getCorpSeal(extCorpId).catch((e) => {
+        this.logger.warn(`社印参照に失敗(corp=${extCorpId}): ${String(e)}`);
+        warnings.push('seal');
+        return null;
+      });
+      accounts = await this.portal.getAccountsByCorp(extCorpId).catch((e) => {
+        this.logger.warn(`口座参照に失敗(corp=${extCorpId}): ${String(e)}`);
+        warnings.push('accounts');
+        return [];
+      });
     }
+
+    // 未設定の理由（プレビューで原因を出すため）。
+    let reason: string | null = null;
+    if (!this.portal.enabled) reason = 'portal_disabled';
+    else if (!extCorpId) reason = 'no_corp_link';
+    else if (warnings.includes('corp')) reason = 'corp_query_error';
+    else if (!portalCorp) reason = 'corp_not_found';
 
     // ポータルに法人が無ければ、旧「請求書設定」を後方互換のフォールバックに使う。
     const legacy = portalCorp
@@ -112,6 +135,8 @@ export class InvoiceSettingService {
       sealImage: config?.sealEnabled === false ? null : seal,
       remark: config?.remark ?? null,
       source: portalCorp ? 'portal' : legacy ? 'legacy' : 'none',
+      reason,
+      warnings,
     };
   }
 
@@ -170,11 +195,24 @@ export class InvoiceSettingService {
       select: { externalCorpId: true },
     });
     if (!this.portal.enabled || !corp?.externalCorpId) {
-      return { enabled: this.portal.enabled, accounts: [] };
+      return {
+        enabled: this.portal.enabled,
+        linked: !!corp?.externalCorpId,
+        accounts: [],
+      };
     }
-    const accounts = await this.portal.getAccountsByCorp(corp.externalCorpId);
+    const accounts = await this.portal
+      .getAccountsByCorp(corp.externalCorpId)
+      .catch((e) => {
+        this.logger.warn(`口座一覧の取得に失敗: ${String(e)}`);
+        return null;
+      });
+    if (accounts === null) {
+      return { enabled: true, linked: true, error: true, accounts: [] };
+    }
     return {
       enabled: true,
+      linked: true,
       accounts: accounts.map((a) => ({
         id: a.id,
         label: this.formatBank(a),
