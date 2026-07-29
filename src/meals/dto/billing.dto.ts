@@ -31,6 +31,26 @@ export class BillingPaymentDto {
   paymentDate!: string | null;
 }
 
+export class BillingIssuedDto {
+  @IsUUID()
+  userId!: string;
+
+  @IsInt()
+  @Min(2000)
+  @Max(2100)
+  year!: number;
+
+  @IsInt()
+  @Min(1)
+  @Max(12)
+  month!: number;
+
+  /** 発行日 YYYY-MM-DD。null で未発行に戻す。 */
+  @ValidateIf((o) => o.issuedDate != null)
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: '発行日はYYYY-MM-DD形式で指定してください' })
+  issuedDate!: string | null;
+}
+
 export class BillingCloseDto {
   @IsString()
   @MinLength(1)

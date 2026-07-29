@@ -247,6 +247,9 @@ export class BillingService {
         paymentDate: rec?.paymentDate
           ? rec.paymentDate.toISOString().slice(0, 10)
           : null,
+        issuedDate: rec?.issuedDate
+          ? rec.issuedDate.toISOString().slice(0, 10)
+          : null,
         note: rec?.note ?? null,
       };
     });
@@ -366,7 +369,11 @@ export class BillingService {
     userId: string,
     year: number,
     month: number,
-    data: { paymentDate?: Date | null; note?: string | null },
+    data: {
+      paymentDate?: Date | null;
+      issuedDate?: Date | null;
+      note?: string | null;
+    },
   ) {
     const scope = computeAccessScope(principal);
     const user = await this.userInScope(scope, userId);
@@ -397,6 +404,19 @@ export class BillingService {
   ) {
     return this.upsertRecord(principal, userId, year, month, {
       paymentDate: paymentDate ? new Date(paymentDate) : null,
+    });
+  }
+
+  /** 請求書の発行日を設定/解除（null=未発行に戻す）。 */
+  setIssued(
+    principal: Principal,
+    userId: string,
+    year: number,
+    month: number,
+    issuedDate: string | null,
+  ) {
+    return this.upsertRecord(principal, userId, year, month, {
+      issuedDate: issuedDate ? new Date(issuedDate) : null,
     });
   }
 

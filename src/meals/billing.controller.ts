@@ -12,6 +12,7 @@ import { Principal } from '../auth/principal.types';
 import { RequirePermission } from '../auth/require-permission.decorator';
 import {
   BillingCloseDto,
+  BillingIssuedDto,
   BillingNoteDto,
   BillingPaymentDto,
 } from './dto/billing.dto';
@@ -55,6 +56,21 @@ export class BillingController {
       dto.year,
       dto.month,
       dto.paymentDate,
+    );
+  }
+
+  @RequirePermission('billing.issue')
+  @Patch('issued')
+  setIssued(
+    @CurrentUser() principal: Principal,
+    @Body() dto: BillingIssuedDto,
+  ) {
+    return this.service.setIssued(
+      principal,
+      dto.userId,
+      dto.year,
+      dto.month,
+      dto.issuedDate,
     );
   }
 

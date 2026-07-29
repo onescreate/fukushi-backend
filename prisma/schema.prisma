@@ -469,6 +469,7 @@ model BillingRecord {
   year          Int
   month         Int // 1-12
   paymentDate   DateTime? @map("payment_date") @db.Date // 入金日（null=未入金）
+  issuedDate    DateTime? @map("issued_date") @db.Date // 請求書の発行日（null=未発行）
   note          String?
   closedSnapshot Json?    @map("closed_snapshot") // 月締め時に確定した金額のスナップショット
   createdBy     String?   @map("created_by") @db.Uuid
