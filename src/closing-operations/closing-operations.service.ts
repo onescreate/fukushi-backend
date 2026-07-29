@@ -61,29 +61,59 @@ export class ClosingOperationsService {
     const attByUser = new Map(attendances.map((a) => [a.userId, a]));
     const mealSet = new Set(meals.map((m) => m.userId));
     const opByUser = new Map(ops.map((o) => [o.userId, o]));
+    const schedByUser = new Map(schedules.map((s) => [s.userId, s]));
+
+    // 対象＝承認済み予定者（欠席含む） ∪ 打刻ありの人（通所予定なしで通所した人も含める）
+    const clockedInIds = attendances
+      .filter((a) => a.clockIn)
+      .map((a) => a.userId);
+    const userIds = [...new Set([...schedByUser.keys(), ...clockedInIds])];
+
+    // 予定に無い（＝氏名が取れていない）打刻ユーザーの氏名・店舗を補完
+    const missingIds = userIds.filter((id) => !schedByUser.has(id));
+    const extraUsers = missingIds.length
+      ? await this.prisma.user.findMany({
+          where: { id: { in: missingIds } },
+          select: { id: true, lastName: true, firstName: true, facilityId: true },
+        })
+      : [];
+    const extraMap = new Map(extraUsers.map((u) => [u.id, u]));
 
     const toHHMM = (d: Date | null) => (d ? jstHHMM(d) : null);
 
-    const rows = schedules.map((s) => {
-      const a = attByUser.get(s.userId);
-      const op = opByUser.get(s.userId);
+    const rows = userIds.map((id) => {
+      const s = schedByUser.get(id);
+      const a = attByUser.get(id);
+      const op = opByUser.get(id);
+      const eu = extraMap.get(id);
+      const facilityId = s?.facilityId ?? eu?.facilityId ?? '';
+      const userName = s
+        ? `${s.user.lastName} ${s.user.firstName}`
+        : eu
+          ? `${eu.lastName} ${eu.firstName}`
+          : '—';
+      const clockedIn = !!a?.clockIn;
+      // 明示的な欠席、または「予定があるのに打刻が無い」→ 欠席
+      const isAbsent = a?.status === 'absent' || (!!s && !clockedIn);
       return {
-        userId: s.userId,
-        userName: `${s.user.lastName} ${s.user.firstName}`,
-        facilityName: allMode ? (facMap.get(s.facilityId) ?? '') : null,
-        planIn: s.planIn,
-        planOut: s.planOut,
+        userId: id,
+        userName,
+        facilityName: allMode ? (facMap.get(facilityId) ?? '') : null,
+        planIn: s?.planIn ?? null,
+        planOut: s?.planOut ?? null,
         actIn: toHHMM(a?.clockIn ?? null),
         actOut: toHHMM(a?.clockOut ?? null),
-        isAbsent: a?.status === 'absent',
-        mealProvided: mealSet.has(s.userId), // 食事提供加算
+        isAbsent,
+        noSchedule: !s, // 通所予定なしで打刻あり（参考表示）
+        mealProvided: mealSet.has(id), // 食事提供加算（喫食から自動）
         regionalCooperation: op?.regionalCooperation ?? false,
         transitionPrep: op?.transitionPrep ?? false,
         absenceHandling: op?.absenceHandling ?? false,
       };
     });
     rows.sort((a, b) => a.userName.localeCompare(b.userName, 'ja'));
-    return { date, allMode, rows };
+    // 当日通所人数＝実際に打刻（通所）した人数
+    return { date, allMode, rows, attendeeCount: clockedInIds.length };
   }
 
   async save(
