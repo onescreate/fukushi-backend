@@ -105,10 +105,16 @@ export class UsersService {
       });
     } catch (e) {
       const code = (e as { code?: string }).code;
+      const detail = (e as { message?: string }).message;
+      // 本当の原因を特定できるよう、Firebaseのエラーコード/メッセージをログに残す（Cloud Runログ）。
+      console.error('[users.create] Firebase createUser failed:', code, detail, e);
       if (code === 'auth/email-already-exists') {
         throw new BadRequestException('このログインIDは既に使われています');
       }
-      throw new BadRequestException('アカウントの作成に失敗しました');
+      // 管理画面(職員のみ)なので、切り分け用にコードを画面にも出す。
+      throw new BadRequestException(
+        `アカウントの作成に失敗しました${code ? `（${code}）` : detail ? `（${String(detail).slice(0, 120)}）` : ''}`,
+      );
     }
 
     try {
