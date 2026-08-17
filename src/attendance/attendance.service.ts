@@ -238,7 +238,11 @@ export class AttendanceService {
 
     const schedules = await this.prisma.schedule.findMany({
       where: { facilityId: { in: facilityIds }, planDate: { gte: from, lte: to } },
-      include: { user: { select: { lastName: true, firstName: true } } },
+      // 明細(実習・中抜け)も返す。一覧の「予定」欄に実習/中抜けを出すため。
+      include: {
+        user: { select: { lastName: true, firstName: true } },
+        details: true,
+      },
     });
     const attendances = await this.prisma.attendance.findMany({
       where: { facilityId: { in: facilityIds }, workDate: { gte: from, lte: to } },
@@ -257,6 +261,14 @@ export class AttendanceService {
       actOut: string | null;
       status: 'present' | 'absent' | 'notyet';
       reason: string | null;
+      /** 実習先（実習日のみ。null=通常の通所） */
+      practicePlace: string | null;
+      /** 中抜け（外出→戻り・用件つき） */
+      breaks: {
+        plannedOut: string | null;
+        plannedIn: string | null;
+        note: string | null;
+      }[];
       /** 管理者が手で補正した記録（null=打刻そのまま） */
       manualEditedAt: string | null;
       manualEditedByName: string | null;
@@ -277,6 +289,16 @@ export class AttendanceService {
         actOut: null,
         status: date < todayStr ? 'absent' : 'notyet',
         reason: null,
+        practicePlace:
+          (s.details ?? []).find((d) => d.eventType === 'practice')?.note ??
+          null,
+        breaks: (s.details ?? [])
+          .filter((d) => d.eventType === 'break_out')
+          .map((d) => ({
+            plannedOut: d.plannedOut,
+            plannedIn: d.plannedIn,
+            note: d.note,
+          })),
         manualEditedAt: null,
         manualEditedByName: null,
       });
@@ -298,6 +320,8 @@ export class AttendanceService {
           actOut: null,
           status: 'notyet',
           reason: null,
+          practicePlace: null,
+          breaks: [],
           manualEditedAt: null,
           manualEditedByName: null,
         } as Row);
