@@ -27,4 +27,13 @@ export class CreateScheduleDto {
   @IsString()
   @MaxLength(200)
   note?: string;
+
+  /**
+   * 実習先。値があればその日を「実習」として扱う（中抜けは持たない）。
+   * 空文字なら実習を解除、未指定なら実習の状態を変更しない。
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  practicePlace?: string;
 }

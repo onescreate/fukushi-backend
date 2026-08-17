@@ -21,6 +21,7 @@ import {
   MyBulkSubmitScheduleDto,
 } from './dto/my-submit-schedule.dto';
 import { computeAutoApproveStatus } from './schedule-rules';
+import { assertBreakOrder, assertPlanOrder } from '../common/time-range';
 
 @Injectable()
 export class SchedulesService {
@@ -46,6 +47,32 @@ export class SchedulesService {
     return user;
   }
 
+  /**
+   * 実習の明細（practice）を予定に反映する。
+   * - undefined … 触らない（従来どおりの更新）
+   * - 空文字    … 実習を解除（practice明細を削除）＝通所日に戻す
+   * - 文字列    … 実習先つきのpractice明細を1件だけ持たせる。実習日に中抜けは無いので break_out は削除。
+   * 利用者本人の申請(mySubmit)と同じ意味づけに揃えてある。
+   */
+  private async syncPractice(
+    scheduleId: string,
+    practicePlace: string | undefined,
+  ) {
+    if (practicePlace === undefined) return;
+    const place = practicePlace.trim();
+    await this.prisma.scheduleDetail.deleteMany({
+      where: {
+        scheduleId,
+        eventType: place ? { in: ['practice', 'break_out'] } : 'practice',
+      },
+    });
+    if (place) {
+      await this.prisma.scheduleDetail.create({
+        data: { scheduleId, eventType: 'practice', note: place },
+      });
+    }
+  }
+
   /** 指定利用者の、期間内の予定一覧 */
   async list(principal: Principal, userId: string, from: string, to: string) {
     const scope = computeAccessScope(principal);
@@ -63,8 +90,9 @@ export class SchedulesService {
   async create(principal: Principal, dto: CreateScheduleDto) {
     const scope = computeAccessScope(principal);
     const user = await this.userInScope(scope, dto.userId);
+    assertPlanOrder(dto.planIn, dto.planOut);
     try {
-      return await this.prisma.schedule.create({
+      const schedule = await this.prisma.schedule.create({
         data: {
           corporationId: user.corporationId,
           facilityId: user.facilityId,
@@ -77,6 +105,8 @@ export class SchedulesService {
           createdBy: principal.id,
         },
       });
+      await this.syncPractice(schedule.id, dto.practicePlace);
+      return schedule;
     } catch (e) {
       if (
         e instanceof Prisma.PrismaClientKnownRequestError &&
@@ -93,7 +123,11 @@ export class SchedulesService {
     const schedule = await this.prisma.schedule.findUnique({ where: { id } });
     if (!schedule) throw new NotFoundException('予定が見つかりません');
     await this.userInScope(scope, schedule.userId);
-    return this.prisma.schedule.update({
+    assertPlanOrder(
+      dto.planIn ?? schedule.planIn,
+      dto.planOut ?? schedule.planOut,
+    );
+    const updated = await this.prisma.schedule.update({
       where: { id },
       data: {
         planIn: dto.planIn,
@@ -101,6 +135,8 @@ export class SchedulesService {
         note: dto.note,
       },
     });
+    await this.syncPractice(id, dto.practicePlace);
+    return updated;
   }
 
   async remove(principal: Principal, id: string) {
@@ -116,6 +152,7 @@ export class SchedulesService {
   async bulkCreate(principal: Principal, dto: BulkScheduleDto) {
     const scope = computeAccessScope(principal);
     const user = await this.userInScope(scope, dto.userId);
+    assertPlanOrder(dto.planIn, dto.planOut);
     const data = dto.dates.map((d) => ({
       corporationId: user.corporationId,
       facilityId: user.facilityId,
@@ -146,6 +183,7 @@ export class SchedulesService {
     });
     if (!schedule) throw new NotFoundException('予定が見つかりません');
     await this.userInScope(scope, schedule.userId);
+    assertBreakOrder(dto.plannedOut, dto.plannedIn);
     return this.prisma.scheduleDetail.create({
       data: {
         scheduleId,
@@ -185,7 +223,11 @@ export class SchedulesService {
     return this.prisma.schedule.findMany({
       where,
       orderBy: { planDate: 'asc' },
-      include: { user: { select: { lastName: true, firstName: true } } },
+      // 明細(中抜け・実習)も返す。承認画面で「利用者が何を申請したか」をそのまま見せるため。
+      include: {
+        user: { select: { lastName: true, firstName: true } },
+        details: true,
+      },
     });
   }
 
@@ -198,6 +240,7 @@ export class SchedulesService {
     principal: Principal,
     id: string,
     decision: 'approved' | 'rejected',
+    reason?: string,
   ) {
     const scope = computeAccessScope(principal);
     const schedule = await this.prisma.schedule.findUnique({ where: { id } });
@@ -207,10 +250,39 @@ export class SchedulesService {
       where: { id },
       data: {
         status: decision,
+        // 却下理由は却下のときだけ残す（承認したら消す）。
+        rejectReason: decision === 'rejected' ? (reason?.trim() || null) : null,
         approvedBy: principal.id,
         approvedAt: new Date(),
       },
     });
+  }
+
+  /**
+   * 複数の予定をまとめて承認/却下する。
+   * 1件ずつ decide() を通す（権限・所属のチェックを一括でも省かない）。
+   * 途中で失敗しても他の件は処理し、結果を件数で返す。
+   */
+  async bulkDecide(
+    principal: Principal,
+    ids: string[],
+    decision: 'approved' | 'rejected',
+    reason?: string,
+  ) {
+    let done = 0;
+    const failed: { id: string; message: string }[] = [];
+    for (const id of ids) {
+      try {
+        await this.decide(principal, id, decision, reason);
+        done++;
+      } catch (e) {
+        failed.push({
+          id,
+          message: e instanceof Error ? e.message : '処理できませんでした',
+        });
+      }
+    }
+    return { done, failed };
   }
 
   // ---------- 利用者本人用（申請） ----------
@@ -229,6 +301,8 @@ export class SchedulesService {
     principal: { id: string; corporationId: string; facilityId: string },
     dto: MySubmitScheduleDto,
   ) {
+    assertPlanOrder(dto.planIn, dto.planOut);
+    for (const b of dto.breaks ?? []) assertBreakOrder(b.plannedOut, b.plannedIn);
     const status = computeAutoApproveStatus(dto.planDate);
     const schedule = await this.prisma.schedule.upsert({
       where: {
@@ -254,6 +328,8 @@ export class SchedulesService {
         planOut: dto.planOut,
         note: dto.note,
         status,
+        // 出し直したら前回の却下理由は消す（差戻の表示が残り続けないように）
+        rejectReason: null,
         approvedBy: null,
         approvedAt: status === 'approved' ? new Date() : null,
       },
@@ -299,6 +375,7 @@ export class SchedulesService {
     principal: { id: string; corporationId: string; facilityId: string },
     dto: MyBulkSubmitScheduleDto,
   ) {
+    assertPlanOrder(dto.planIn, dto.planOut);
     let approved = 0;
     let pending = 0;
     for (const date of dto.dates) {
@@ -327,6 +404,7 @@ export class SchedulesService {
           planOut: dto.planOut,
           note: dto.note,
           status,
+          rejectReason: null,
           approvedBy: null,
           approvedAt: status === 'approved' ? new Date() : null,
         },

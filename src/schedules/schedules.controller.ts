@@ -15,6 +15,10 @@ import { CreateScheduleDto } from './dto/create-schedule.dto';
 import { UpdateScheduleDto } from './dto/update-schedule.dto';
 import { BulkScheduleDto } from './dto/bulk-schedule.dto';
 import { CreateScheduleDetailDto } from './dto/create-detail.dto';
+import {
+  BulkDecideScheduleDto,
+  DecideScheduleDto,
+} from './dto/decide-schedule.dto';
 import { SchedulesService } from './schedules.service';
 import { ParseYmdPipe } from '../common/parse-ymd.pipe';
 
@@ -45,6 +49,21 @@ export class SchedulesController {
     return this.service.pendingCount(principal);
   }
 
+  /** まとめて承認/却下（:id より前に置く。'decide' が :id と解釈されないようにするため） */
+  @RequirePermission('schedule.approve')
+  @Patch('decide')
+  bulkDecide(
+    @CurrentUser() principal: Principal,
+    @Body() dto: BulkDecideScheduleDto,
+  ) {
+    return this.service.bulkDecide(
+      principal,
+      dto.ids,
+      dto.decision === 'approve' ? 'approved' : 'rejected',
+      dto.reason,
+    );
+  }
+
   @RequirePermission('schedule.approve')
   @Patch(':id/approve')
   approve(@CurrentUser() principal: Principal, @Param('id') id: string) {
@@ -53,8 +72,12 @@ export class SchedulesController {
 
   @RequirePermission('schedule.approve')
   @Patch(':id/reject')
-  reject(@CurrentUser() principal: Principal, @Param('id') id: string) {
-    return this.service.decide(principal, id, 'rejected');
+  reject(
+    @CurrentUser() principal: Principal,
+    @Param('id') id: string,
+    @Body() dto: DecideScheduleDto,
+  ) {
+    return this.service.decide(principal, id, 'rejected', dto?.reason);
   }
 
   @RequirePermission('schedule.submit')

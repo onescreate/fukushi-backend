@@ -17,7 +17,15 @@ import { UpdateAttendanceSettingsDto } from './dto/attendance-settings.dto';
 import { ManualAttendanceDto } from './dto/manual-attendance.dto';
 import { isLateArrival, isEarlyDeparture } from './attendance-rules';
 
-import { pad, jstNow, dateStr, toHHMM, minutesOfDay } from '../common/date';
+import {
+  pad,
+  jstNow,
+  dateStr,
+  toHHMM,
+  minutesOfDay,
+  parseHHMM,
+} from '../common/date';
+import { assertClockOrder } from '../common/time-range';
 
 @Injectable()
 export class AttendanceService {
@@ -189,6 +197,9 @@ export class AttendanceService {
         absenceReason: a?.absenceReason ?? null,
         lateReason: a?.lateReason ?? null,
         earlyLeaveReason: a?.earlyLeaveReason ?? null,
+        // 管理者が手で補正した記録（null=打刻そのまま）
+        manualEditedAt: a?.manualEditedAt ? a.manualEditedAt.toISOString() : null,
+        manualEditedByName: a?.manualEditedByName ?? null,
         meal:
           m && (m.status === 'reserved' || m.status === 'eaten')
             ? { status: m.status }
@@ -246,6 +257,9 @@ export class AttendanceService {
       actOut: string | null;
       status: 'present' | 'absent' | 'notyet';
       reason: string | null;
+      /** 管理者が手で補正した記録（null=打刻そのまま） */
+      manualEditedAt: string | null;
+      manualEditedByName: string | null;
     };
     const map = new Map<string, Row>();
     for (const s of schedules) {
@@ -263,6 +277,8 @@ export class AttendanceService {
         actOut: null,
         status: date < todayStr ? 'absent' : 'notyet',
         reason: null,
+        manualEditedAt: null,
+        manualEditedByName: null,
       });
     }
     for (const a of attendances) {
@@ -282,11 +298,17 @@ export class AttendanceService {
           actOut: null,
           status: 'notyet',
           reason: null,
+          manualEditedAt: null,
+          manualEditedByName: null,
         } as Row);
       base.actIn = a.clockIn ? toHHMM(jstNow(a.clockIn)) : null;
       base.actOut = a.clockOut ? toHHMM(jstNow(a.clockOut)) : null;
       base.status = a.clockIn ? 'present' : a.status === 'absent' ? 'absent' : base.status;
       base.reason = a.absenceReason ?? a.lateReason ?? a.earlyLeaveReason ?? null;
+      base.manualEditedAt = a.manualEditedAt
+        ? a.manualEditedAt.toISOString()
+        : null;
+      base.manualEditedByName = a.manualEditedByName ?? null;
       map.set(key, base);
     }
     const rows = [...map.values()];
@@ -296,7 +318,12 @@ export class AttendanceService {
     return { year, month, allMode, rows };
   }
 
-  /** 管理側の手動補正（打刻時刻・欠席・理由） */
+  /**
+   * 管理側の手動補正（打刻時刻・欠席・理由）。
+   * - 退所が通所より前になる入力は弾く
+   * - 補正後の時刻で遅刻・早退を判定し直す（打刻し直したのと同じ状態にする）
+   * - 「誰が・いつ補正したか」を残し、一覧に「手修正」と出せるようにする
+   */
   async manualUpdate(principal: Principal, dto: ManualAttendanceDto) {
     const scope = computeAccessScope(principal);
     const user = await this.prisma.user
@@ -314,19 +341,35 @@ export class AttendanceService {
     ) {
       throw new ForbiddenException('この利用者を操作する権限がありません');
     }
+    assertClockOrder(dto.clockIn, dto.clockOut);
 
     const workDate = new Date(dto.date);
     const toInstant = (hhmm?: string) =>
       hhmm ? new Date(`${dto.date}T${hhmm}:00+09:00`) : undefined;
 
+    // 補正後の時刻で遅刻・早退を判定し直す（従来は打刻時の判定が残りっぱなしだった）。
+    const { isLate, isEarlyLeave } = await this.recomputeLateEarly(
+      dto.userId,
+      user.facilityId,
+      workDate,
+      dto.status ?? 'present',
+      dto.clockIn,
+      dto.clockOut,
+    );
+
+    const editedName = principal.type === 'staff' ? principal.name : null;
     const data = {
       status: dto.status,
       clockIn: toInstant(dto.clockIn),
       clockOut: toInstant(dto.clockOut),
+      isLate,
+      isEarlyLeave,
       absenceReason: dto.absenceReason,
       lateReason: dto.lateReason,
       earlyLeaveReason: dto.earlyLeaveReason,
       updatedBy: principal.id,
+      manualEditedAt: new Date(),
+      manualEditedByName: editedName,
     };
 
     await this.prisma.attendance.upsert({
@@ -339,14 +382,57 @@ export class AttendanceService {
         status: dto.status ?? 'present',
         clockIn: toInstant(dto.clockIn),
         clockOut: toInstant(dto.clockOut),
+        isLate,
+        isEarlyLeave,
         absenceReason: dto.absenceReason,
         lateReason: dto.lateReason,
         earlyLeaveReason: dto.earlyLeaveReason,
         createdBy: principal.id,
+        updatedBy: principal.id,
+        manualEditedAt: new Date(),
+        manualEditedByName: editedName,
       },
       update: data,
     });
     return { ok: true };
+  }
+
+  /**
+   * 補正後の時刻から遅刻・早退を計算し直す。
+   * 打刻時と同じ規則（承認済みの予定に対してのみ判定・店舗の猶予を適用）を使う。
+   * 欠席にした場合や時刻が空の場合は false（フラグを残さない）。
+   */
+  private async recomputeLateEarly(
+    userId: string,
+    facilityId: string,
+    workDate: Date,
+    status: 'present' | 'absent',
+    clockIn?: string,
+    clockOut?: string,
+  ): Promise<{ isLate: boolean; isEarlyLeave: boolean }> {
+    if (status === 'absent') return { isLate: false, isEarlyLeave: false };
+    const schedule = await this.prisma.schedule.findUnique({
+      where: { userId_planDate: { userId, planDate: workDate } },
+      select: { status: true, planIn: true, planOut: true },
+    });
+    if (!schedule || schedule.status !== 'approved') {
+      return { isLate: false, isEarlyLeave: false };
+    }
+    const settings = await this.getSettings(facilityId);
+    const inMin = clockIn ? parseHHMM(clockIn) : null;
+    const outMin = clockOut ? parseHHMM(clockOut) : null;
+    return {
+      isLate:
+        inMin !== null &&
+        isLateArrival(schedule.planIn, inMin, settings.lateGraceMinutes),
+      isEarlyLeave:
+        outMin !== null &&
+        isEarlyDeparture(
+          schedule.planOut,
+          outMin,
+          settings.earlyLeaveGraceMinutes,
+        ),
+    };
   }
 
   /** 打刻画面に出す「今日の予定・中抜け・食事」情報 */
@@ -448,12 +534,12 @@ export class AttendanceService {
 
     const today = new Date(dateStr(jstNow()));
 
-    // 差戻（却下された申請）
+    // 差戻（却下された申請）。却下理由も返し、本人が理由を見られるようにする。
     const rejected = await this.prisma.schedule.findMany({
       where: { userId, status: 'rejected' },
       orderBy: { planDate: 'desc' },
       take: 20,
-      select: { id: true, planDate: true },
+      select: { id: true, planDate: true, rejectReason: true },
     });
 
     // 過去の承認済み予定で打刻が無い日 → 欠席レコードを用意（遅延生成）
@@ -527,7 +613,10 @@ export class AttendanceService {
     }
 
     return {
-      rejected: rejected.map((r) => ({ date: dateStr(r.planDate) })),
+      rejected: rejected.map((r) => ({
+        date: dateStr(r.planDate),
+        reason: r.rejectReason,
+      })),
       reasonNeeded,
     };
   }

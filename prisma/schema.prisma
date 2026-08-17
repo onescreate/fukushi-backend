@@ -237,6 +237,8 @@ model Schedule {
   planOut       String?        @map("plan_out") // "HH:MM"
   status        ScheduleStatus @default(approved)
   note          String?
+  /// 却下した理由（承認画面で入力。利用者にそのまま見せる）。承認するとクリアされる。
+  rejectReason  String?        @map("reject_reason")
   createdBy     String?        @map("created_by") @db.Uuid
   approvedBy    String?        @map("approved_by") @db.Uuid
   approvedAt    DateTime?      @map("approved_at")
@@ -287,6 +289,10 @@ model Attendance {
   earlyLeaveReason String?         @map("early_leave_reason")
   createdBy     String?          @map("created_by") @db.Uuid
   updatedBy     String?          @map("updated_by") @db.Uuid
+  /// 管理者が手で補正した日時（null=打刻そのまま）。画面に「手修正」と出すために使う。
+  manualEditedAt     DateTime? @map("manual_edited_at")
+  /// 補正した職員の氏名。ポータル由来のアカウントはIDから名前を引けないため、名前そのものを残す。
+  manualEditedByName String?   @map("manual_edited_by_name")
   createdAt     DateTime         @default(now()) @map("created_at")
   updatedAt     DateTime         @updatedAt @map("updated_at")
 
