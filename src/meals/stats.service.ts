@@ -178,11 +178,13 @@ export class StatsService {
     if (perms.has('meal.delivery.manage')) {
       const today = new Date(todayStr);
       for (const fid of facilityIds) {
+        // 発注数の数え方は納品画面(DeliveryService.monthly)と揃える。
+        // キャンセル(cancelled)も食事は届くため対象に含める。
         const orders = await this.prisma.meal.count({
           where: {
             facilityId: fid,
             approvalStatus: 'approved',
-            status: { in: ['reserved', 'eaten'] },
+            status: { in: ['reserved', 'eaten', 'cancelled'] },
             mealDate: today,
           },
         });

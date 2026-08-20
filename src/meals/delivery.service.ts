@@ -31,7 +31,12 @@ export class DeliveryService {
 
   /**
    * 店舗×年月の納品状況（日別）。
-   * 発注数＝承認済みの予約(reserved/eaten)の食数、納品数＝手入力。
+   * 発注数＝承認済みの「予約(reserved)・喫食済(eaten)・キャンセル(cancelled)」の食数、納品数＝手入力。
+   *
+   * キャンセル(cancelled)を含めるのは、締切後のキャンセル＝キャンセル料が発生する扱いで、
+   * 食事そのものは作られて届くため。発注数から外すと、キャンセルのたびに発注数が1減って
+   * 納品数と食い違ってしまう（利用者がキャンセルしても納品数は変わらない）。
+   * 一方 revoked（締切前の無料取消）は発注前の取消なので含めない。
    */
   async monthly(
     principal: Principal,
@@ -53,15 +58,20 @@ export class DeliveryService {
       where: {
         facilityId: { in: facilityIds },
         approvalStatus: 'approved',
-        status: { in: ['reserved', 'eaten'] },
+        status: { in: ['reserved', 'eaten', 'cancelled'] },
         mealDate: { gte: from, lte: to },
       },
-      select: { mealDate: true },
+      select: { mealDate: true, status: true },
     });
     const orderByDate = new Map<string, number>();
+    // 発注数のうちキャンセル分（画面で内訳を出し、数が合わない誤解を防ぐ）
+    const cancelledByDate = new Map<string, number>();
     for (const m of meals) {
       const d = m.mealDate.toISOString().slice(0, 10);
       orderByDate.set(d, (orderByDate.get(d) ?? 0) + 1);
+      if (m.status === 'cancelled') {
+        cancelledByDate.set(d, (cancelledByDate.get(d) ?? 0) + 1);
+      }
     }
 
     const deliveries = await this.prisma.mealDelivery.findMany({
@@ -82,7 +92,12 @@ export class DeliveryService {
     ]);
     const days: Record<
       string,
-      { orderCount: number; deliveryCount: number | null; note: string | null }
+      {
+        orderCount: number;
+        cancelledCount: number;
+        deliveryCount: number | null;
+        note: string | null;
+      }
     > = {};
     const unentered: string[] = [];
     const mismatch: { date: string; orderCount: number; deliveryCount: number }[] = [];
@@ -92,7 +107,12 @@ export class DeliveryService {
       const deliveryCount = delSumByDate.has(date)
         ? (delSumByDate.get(date) ?? 0)
         : null;
-      days[date] = { orderCount, deliveryCount, note: delNoteByDate.get(date) ?? null };
+      days[date] = {
+        orderCount,
+        cancelledCount: cancelledByDate.get(date) ?? 0,
+        deliveryCount,
+        note: delNoteByDate.get(date) ?? null,
+      };
       if (orderCount > 0 && deliveryCount === null) unentered.push(date);
       if (deliveryCount !== null && deliveryCount !== orderCount) {
         mismatch.push({ date, orderCount, deliveryCount });
