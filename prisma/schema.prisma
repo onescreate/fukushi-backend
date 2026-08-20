@@ -365,6 +365,8 @@ model Meal {
   situation     String?
   approvalStatus MealApprovalStatus @default(approved) @map("approval_status")
   requestType   MealRequestType?    @map("request_type") // 承認待ちのとき、予約 or キャンセルのどちらの申請か
+  /// 却下した理由（承認画面で入力。利用者にそのまま見せる）。承認するとクリアされる。
+  rejectReason  String?    @map("reject_reason")
   createdBy     String?    @map("created_by") @db.Uuid
   updatedBy     String?    @map("updated_by") @db.Uuid
   approvedBy    String?    @map("approved_by") @db.Uuid

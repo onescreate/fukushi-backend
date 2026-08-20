@@ -124,6 +124,7 @@ export class MealReservationService {
     amount: number;
     approvalStatus: string;
     requestType: string | null;
+    rejectReason?: string | null;
   }) {
     return {
       id: m.id,
@@ -134,6 +135,7 @@ export class MealReservationService {
       amount: m.amount,
       approvalStatus: m.approvalStatus,
       requestType: m.requestType,
+      rejectReason: m.rejectReason ?? null,
     };
   }
 
@@ -454,6 +456,7 @@ export class MealReservationService {
     principal: Principal,
     id: string,
     decision: 'approved' | 'rejected',
+    reason?: string,
   ) {
     const scope = computeAccessScope(principal);
     const meal = await this.prisma.meal.findUnique({ where: { id } });
@@ -475,6 +478,8 @@ export class MealReservationService {
       approvedBy: principal.id,
       approvedAt: new Date(),
       requestType: null,
+      // 却下理由は却下のときだけ残す（承認したら消す）。予定承認と同じ扱い。
+      rejectReason: decision === 'rejected' ? (reason?.trim() || null) : null,
     };
 
     if (decision === 'approved') {
@@ -507,7 +512,7 @@ export class MealReservationService {
 
     // 却下
     if (meal.requestType === 'cancel') {
-      // キャンセル却下 → 予約のまま
+      // キャンセル却下 → 予約のまま（食事代は予約時のまま請求する）
       return this.serialize(
         await this.prisma.meal.update({
           where: { id },
@@ -515,12 +520,41 @@ export class MealReservationService {
         }),
       );
     }
-    // 予約却下 → 却下として記録（無効）
+    // 予約却下 → 却下として記録（無効）。
+    // 金額は必ず0にする（食事は提供されないため請求も発注も発生しない）。
+    // 以前は予約時の金額が残り、一覧に「却下 / 200円」と出て誤解を招いていた。
     return this.serialize(
       await this.prisma.meal.update({
         where: { id },
-        data: { ...base, approvalStatus: 'rejected' },
+        data: { ...base, approvalStatus: 'rejected', amount: 0 },
       }),
     );
+  }
+
+  /**
+   * 複数の食事申請をまとめて承認/却下する。
+   * 1件ずつ decide() を通す（権限・締め・所属のチェックを一括でも省かない）。
+   * 途中で失敗しても他の件は処理し、結果を件数で返す（予定承認の一括処理と同じ作り）。
+   */
+  async bulkDecide(
+    principal: Principal,
+    ids: string[],
+    decision: 'approved' | 'rejected',
+    reason?: string,
+  ) {
+    let done = 0;
+    const failed: { id: string; message: string }[] = [];
+    for (const id of ids) {
+      try {
+        await this.decide(principal, id, decision, reason);
+        done++;
+      } catch (e) {
+        failed.push({
+          id,
+          message: e instanceof Error ? e.message : '処理できませんでした',
+        });
+      }
+    }
+    return { done, failed };
   }
 }

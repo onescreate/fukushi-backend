@@ -11,6 +11,7 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import { Principal } from '../auth/principal.types';
 import { RequirePermission } from '../auth/require-permission.decorator';
 import { AdminMealDto } from './dto/admin-meal.dto';
+import { BulkDecideMealDto, DecideMealDto } from './dto/decide-meal.dto';
 import { MealReservationService } from './meal-reservation.service';
 import { ParseYmdPipe } from '../common/parse-ymd.pipe';
 
@@ -48,6 +49,21 @@ export class MealReservationController {
     return this.service.adminUpsert(principal, dto);
   }
 
+  /** まとめて承認/却下（:id より前に置く。'decide' が :id と解釈されないようにするため） */
+  @RequirePermission('meal.manage')
+  @Patch('decide')
+  bulkDecide(
+    @CurrentUser() principal: Principal,
+    @Body() dto: BulkDecideMealDto,
+  ) {
+    return this.service.bulkDecide(
+      principal,
+      dto.ids,
+      dto.decision === 'approve' ? 'approved' : 'rejected',
+      dto.reason,
+    );
+  }
+
   @RequirePermission('meal.manage')
   @Patch(':id/approve')
   approve(@CurrentUser() principal: Principal, @Param('id') id: string) {
@@ -56,7 +72,11 @@ export class MealReservationController {
 
   @RequirePermission('meal.manage')
   @Patch(':id/reject')
-  reject(@CurrentUser() principal: Principal, @Param('id') id: string) {
-    return this.service.decide(principal, id, 'rejected');
+  reject(
+    @CurrentUser() principal: Principal,
+    @Param('id') id: string,
+    @Body() dto: DecideMealDto,
+  ) {
+    return this.service.decide(principal, id, 'rejected', dto?.reason);
   }
 }
