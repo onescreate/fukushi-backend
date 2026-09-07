@@ -91,6 +91,14 @@ export class AuthGuard implements CanActivate {
       include: { facilityRoles: true },
     });
     if (staff) {
+      // ★退職・無効化された職員はログインさせない。
+      //   これまで status をまったく見ておらず、無効(inactive)にしても
+      //   firebase_uid が一致するだけで通ってしまっていた。
+      if (staff.status === 'inactive') {
+        throw new ForbiddenException(
+          'このアカウントは利用停止されています。管理者にお問い合わせください。',
+        );
+      }
       return {
         type: 'staff',
         id: staff.id,
@@ -107,6 +115,14 @@ export class AuthGuard implements CanActivate {
 
     const user = await this.prisma.user.findUnique({ where: { firebaseUid } });
     if (user) {
+      // ★退所した利用者はログインさせない（職員と同じ理由）。
+      //   施設のタブレット(キオスク)は @Public でこのガードを通らないため、
+      //   現場の打刻・喫食入力には影響しない。ここで止まるのは自宅からの個人ページのみ。
+      if (user.status === 'withdrawn') {
+        throw new ForbiddenException(
+          'このアカウントは退所により利用できません。施設の担当者にお問い合わせください。',
+        );
+      }
       return {
         type: 'user',
         id: user.id,

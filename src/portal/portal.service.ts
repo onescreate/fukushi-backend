@@ -93,6 +93,7 @@ export class PortalService implements OnModuleDestroy {
               staff_id AS "staffId", shop_id AS "shopId"
        FROM ones_accounting_users
        WHERE email = $1 AND (delete_flag = false OR delete_flag IS NULL)
+         AND (status IS DISTINCT FROM 'suspended')
        LIMIT 1`,
       [email],
     );
